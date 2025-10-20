@@ -83,7 +83,7 @@ sudo ./configure-kubelet-reservations.sh
 
 ```bash
 # Télécharger le script
-curl -O https://votre-repo.com/configure-kubelet-reservations.sh
+curl -O https://gitlab.com/omega8280051/reserved-sys-kube/-/raw/main/kubelet_auto_config.sh
 
 # Rendre exécutable
 chmod +x configure-kubelet-reservations.sh
@@ -95,8 +95,8 @@ chmod +x configure-kubelet-reservations.sh
 ### Méthode 2 : Via Git
 
 ```bash
-git clone https://github.com/votre-org/kubelet-config.git
-cd kubelet-config
+git clone https://gitlab.com/omega8280051/reserved-sys-kube.git
+cd reserved-sys-kube
 chmod +x configure-kubelet-reservations.sh
 ```
 
@@ -1311,21 +1311,13 @@ SOFTWARE.
 
 ### Communauté
 
-- **GitHub Issues** : [github.com/votre-org/kubelet-config/issues](https://github.com)
-- **Slack** : `#kubelet-config` sur Kubernetes Slack
-- **Stack Overflow** : Tag `kubernetes-kubelet`
-
-### Support commercial
-
-Pour un support dédié, formation ou consulting :
-- Email : support@votre-entreprise.com
-- Web : https://votre-entreprise.com/kubernetes-support
+- **GitHub Issues** : [https://gitlab.com/omega8280051/reserved-sys-kube/-/issues](https://gitlab.com)
 
 ---
 
 ## ✨ Crédits
 
-**Développé par** : Votre équipe Platform Engineering
+**Développé par** : un stagiaire nommé Claude. Mais avec un Senior derrière lui quand même. 
 
 **Basé sur** :
 - Formules officielles Google (GKE)
@@ -1337,17 +1329,6 @@ Pour un support dédié, formation ou consulting :
 - Communauté Kubernetes
 - CNCF (Cloud Native Computing Foundation)
 - Contributeurs open source
-
----
-
-## 📞 Contact rapide
-
-```
-📧 Email      : platform-team@votre-entreprise.com
-💬 Slack      : #platform-engineering
-📚 Docs       : https://docs.votre-entreprise.com/kubelet
-🐛 Bug Report : https://github.com/votre-org/kubelet-config/issues
-```
 
 ---
 
@@ -1369,6 +1350,6 @@ Pour un support dédié, formation ou consulting :
 
 ---
 
-**Dernière mise à jour** : 20 janvier 2025  
+**Dernière mise à jour** : 20 oct 2025  
 **Version du README** : 1.0.0  
 **Mainteneur** : Platform Engineering Team
