@@ -1,27 +1,42 @@
 #!/bin/bash
 ################################################################################
 # Script de configuration automatique des réservations kubelet
-# Compatible Kubernetes v1.32, cgroups v2, systemd
+# Version: 2.0.0-production
+# Compatible Kubernetes v1.32+, cgroups v1/v2, systemd
+#
+# Améliorations v2.0.0:
+#   - Validation complète des entrées
+#   - Détection RAM améliorée (précision MiB)
+#   - Seuils d'éviction dynamiques selon la taille du nœud
+#   - Vérification et création automatique des cgroups
+#   - Rollback automatique en cas d'échec
+#   - Validation YAML avant application
+#   - Backup automatique de sécurité
 #
 # Usage:
-#   ./configure-kubelet-reservations.sh [OPTIONS]
+#   ./kubelet_auto_config.sh [OPTIONS]
 #
 # Options:
 #   --profile <gke|eks|conservative|minimal>  Profil de calcul (défaut: gke)
-#   --density-factor <float>                   Facteur multiplicateur (défaut: 1.0)
+#   --density-factor <float>                   Facteur multiplicateur 0.1-5.0 (défaut: 1.0, recommandé: 0.5-3.0)
 #   --target-pods <int>                        Nombre de pods cible (calcul auto du facteur)
 #   --dry-run                                  Affiche la config sans appliquer
-#   --backup                                   Sauvegarde la config existante
+#   --backup                                   Conserve le backup (par défaut supprimé si succès)
 #   --help                                     Affiche l'aide
 #
 # Exemples:
-#   ./configure-kubelet-reservations.sh
-#   ./configure-kubelet-reservations.sh --profile conservative --density-factor 1.5
-#   ./configure-kubelet-reservations.sh --target-pods 110 --profile conservative
-#   ./configure-kubelet-reservations.sh --dry-run
+#   ./kubelet_auto_config.sh
+#   ./kubelet_auto_config.sh --profile conservative --density-factor 1.5
+#   ./kubelet_auto_config.sh --target-pods 110 --profile conservative
+#   ./kubelet_auto_config.sh --dry-run
+#
+# Dépendances: bc, jq, systemctl, yq
 ################################################################################
 
 set -euo pipefail
+
+# Version
+VERSION="2.0.0-production"
 
 # Couleurs pour l'output
 RED='\033[0;31m'
@@ -72,15 +87,60 @@ check_root() {
 
 check_dependencies() {
     local missing=()
-    for cmd in bc jq systemctl; do
+    for cmd in bc jq systemctl yq; do
         if ! command -v "$cmd" &> /dev/null; then
             missing+=("$cmd")
         fi
     done
-    
+
     if [[ ${#missing[@]} -gt 0 ]]; then
-        log_error "Dépendances manquantes: ${missing[*]}. Installez-les avec: apt install bc jq systemd"
+        log_error "Dépendances manquantes: ${missing[*]}. Installez-les avec: apt install bc jq systemd yq"
     fi
+}
+
+validate_positive_integer() {
+    local value=$1
+    local name=$2
+
+    if ! [[ "$value" =~ ^[0-9]+$ ]]; then
+        log_error "$name doit être un entier positif (reçu: $value)"
+    fi
+
+    if (( value <= 0 )); then
+        log_error "$name doit être supérieur à 0 (reçu: $value)"
+    fi
+}
+
+validate_density_factor() {
+    local factor=$1
+
+    if ! [[ "$factor" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+        log_error "Le density-factor doit être un nombre valide (reçu: $factor)"
+    fi
+
+    if (( $(echo "$factor < 0.1" | bc -l) )); then
+        log_error "Le density-factor doit être >= 0.1 (reçu: $factor)"
+    fi
+
+    if (( $(echo "$factor > 5.0" | bc -l) )); then
+        log_error "Le density-factor doit être <= 5.0 (reçu: $factor)"
+    fi
+
+    if (( $(echo "$factor < 0.5 || $factor > 3.0" | bc -l) )); then
+        log_warning "Le density-factor $factor est hors de la plage recommandée (0.5-3.0)"
+    fi
+}
+
+validate_profile() {
+    local profile=$1
+    case $profile in
+        gke|eks|conservative|minimal)
+            return 0
+            ;;
+        *)
+            log_error "Profil invalide: $profile. Valeurs acceptées: gke, eks, conservative, minimal"
+            ;;
+    esac
 }
 
 ################################################################################
@@ -88,17 +148,33 @@ check_dependencies() {
 ################################################################################
 
 detect_vcpu() {
-    nproc
+    local vcpu
+    vcpu=$(nproc)
+
+    if (( vcpu <= 0 )); then
+        log_error "Impossible de détecter le nombre de vCPU"
+    fi
+
+    echo "$vcpu"
 }
 
 detect_ram_gib() {
-    # Retourne la RAM totale en GiB (arrondi)
-    free -g | awk '/^Mem:/ {print $2}'
+    # Retourne la RAM totale en GiB (calculé depuis MiB pour plus de précision)
+    local ram_mib
+    ram_mib=$(detect_ram_mib)
+    echo "scale=2; $ram_mib / 1024" | bc
 }
 
 detect_ram_mib() {
     # Retourne la RAM totale en MiB (précis)
-    free -m | awk '/^Mem:/ {print $2}'
+    local ram_mib
+    ram_mib=$(free -m | awk '/^Mem:/ {print $2}')
+
+    if (( ram_mib <= 0 )); then
+        log_error "Impossible de détecter la RAM système"
+    fi
+
+    echo "$ram_mib"
 }
 
 ################################################################################
@@ -108,7 +184,14 @@ detect_ram_mib() {
 calculate_density_factor() {
     local target_pods=$1
     local factor
-    
+
+    # Validate input
+    validate_positive_integer "$target_pods" "target-pods"
+
+    if (( target_pods > 500 )); then
+        log_warning "target-pods très élevé ($target_pods). Maximum recommandé: 500"
+    fi
+
     if (( target_pods <= 30 )); then
         factor="1.0"
     elif (( target_pods <= 50 )); then
@@ -128,7 +211,7 @@ calculate_density_factor() {
         fi
         factor=$(echo "scale=2; 1.5 + ($excess / 180.0)" | bc)
     fi
-    
+
     echo "$factor"
 }
 
@@ -292,6 +375,96 @@ apply_density_factor() {
 }
 
 ################################################################################
+# Vérification et création des cgroups
+################################################################################
+
+ensure_cgroups() {
+    log_info "Vérification des cgroups requis..."
+
+    # Détecter la version de cgroup
+    local cgroup_version
+    if [[ -f /sys/fs/cgroup/cgroup.controllers ]]; then
+        cgroup_version="v2"
+        log_info "Système cgroup v2 détecté"
+    else
+        cgroup_version="v1"
+        log_info "Système cgroup v1 détecté"
+    fi
+
+    # Pour cgroup v2
+    if [[ "$cgroup_version" == "v2" ]]; then
+        # Vérifier system.slice
+        if [[ ! -d /sys/fs/cgroup/system.slice ]]; then
+            log_warning "Cgroup /system.slice n'existe pas, il sera créé par systemd"
+        else
+            log_success "Cgroup /system.slice existe"
+        fi
+
+        # Vérifier kubelet.slice
+        if [[ ! -d /sys/fs/cgroup/kubelet.slice ]]; then
+            log_info "Création du cgroup /kubelet.slice..."
+            if systemctl cat kubelet.slice &>/dev/null; then
+                log_success "kubelet.slice déjà configuré dans systemd"
+            else
+                log_warning "kubelet.slice n'existe pas. Création d'une unit systemd..."
+                cat > /etc/systemd/system/kubelet.slice <<'EOF'
+[Unit]
+Description=Kubelet Slice
+Before=slices.target
+
+[Slice]
+CPUAccounting=yes
+MemoryAccounting=yes
+EOF
+                systemctl daemon-reload
+                systemctl start kubelet.slice
+                log_success "kubelet.slice créé et démarré"
+            fi
+        else
+            log_success "Cgroup /kubelet.slice existe"
+        fi
+    else
+        # Pour cgroup v1
+        log_warning "Cgroup v1 détecté. Assurez-vous que les cgroups sont configurés manuellement si nécessaire."
+    fi
+}
+
+################################################################################
+# Calcul des seuils d'éviction dynamiques
+################################################################################
+
+calculate_eviction_thresholds() {
+    local ram_gib=$1
+    local ram_mib=$2
+
+    # Eviction hard memory - scale with RAM size
+    local eviction_hard_mem
+    if (( $(echo "$ram_gib < 8" | bc -l) )); then
+        eviction_hard_mem="250Mi"
+    elif (( $(echo "$ram_gib < 32" | bc -l) )); then
+        eviction_hard_mem="500Mi"
+    elif (( $(echo "$ram_gib < 64" | bc -l) )); then
+        eviction_hard_mem="1Gi"
+    else
+        eviction_hard_mem="2Gi"
+    fi
+
+    # Eviction soft memory
+    local eviction_soft_mem
+    if (( $(echo "$ram_gib < 8" | bc -l) )); then
+        eviction_soft_mem="500Mi"
+    elif (( $(echo "$ram_gib < 32" | bc -l) )); then
+        eviction_soft_mem="1Gi"
+    elif (( $(echo "$ram_gib < 64" | bc -l) )); then
+        eviction_soft_mem="2Gi"
+    else
+        eviction_soft_mem="4Gi"
+    fi
+
+    echo "$eviction_hard_mem $eviction_soft_mem"
+}
+
+################################################################################
 # Génération de la configuration kubelet
 ################################################################################
 
@@ -302,7 +475,11 @@ generate_kubelet_config() {
     local kube_mem=$4
     local vcpu=$5
     local ram_gib=$6
-    
+    local ram_mib=$7
+
+    # Calcul des seuils d'éviction
+    read -r eviction_hard_mem eviction_soft_mem <<< $(calculate_eviction_thresholds "$ram_gib" "$ram_mib")
+
     cat <<EOF
 # Configuration générée automatiquement le $(date)
 # Profil: $PROFILE | Density-factor: $DENSITY_FACTOR
@@ -339,16 +516,16 @@ systemReservedCgroup: "/system.slice"
 kubeReservedCgroup: "/kubelet.slice"
 
 # ============================================================
-# SEUILS D'ÉVICTION
+# SEUILS D'ÉVICTION (dynamiques selon la taille du nœud)
 # ============================================================
 evictionHard:
-  memory.available: "500Mi"
+  memory.available: "${eviction_hard_mem}"
   nodefs.available: "10%"
   nodefs.inodesFree: "5%"
   imagefs.available: "15%"
 
 evictionSoft:
-  memory.available: "1Gi"
+  memory.available: "${eviction_soft_mem}"
   nodefs.available: "15%"
   imagefs.available: "20%"
 
@@ -382,6 +559,35 @@ EOF
 }
 
 ################################################################################
+# Validation YAML
+################################################################################
+
+validate_yaml() {
+    local config_file=$1
+
+    log_info "Validation de la configuration YAML..."
+
+    if ! yq eval '.' "$config_file" > /dev/null 2>&1; then
+        log_error "La configuration générée n'est pas un YAML valide"
+    fi
+
+    # Vérifications supplémentaires
+    local api_version
+    api_version=$(yq eval '.apiVersion' "$config_file" 2>/dev/null)
+    if [[ "$api_version" != "kubelet.config.k8s.io/v1beta1" ]]; then
+        log_error "apiVersion invalide dans la configuration: $api_version"
+    fi
+
+    local kind
+    kind=$(yq eval '.kind' "$config_file" 2>/dev/null)
+    if [[ "$kind" != "KubeletConfiguration" ]]; then
+        log_error "kind invalide dans la configuration: $kind"
+    fi
+
+    log_success "Configuration YAML validée"
+}
+
+################################################################################
 # Affichage du résumé
 ################################################################################
 
@@ -392,7 +598,7 @@ display_summary() {
     local sys_mem=$4
     local kube_cpu=$5
     local kube_mem=$6
-    
+
     local total_cpu=$((sys_cpu + kube_cpu))
     local total_mem=$((sys_mem + kube_mem))
     local alloc_cpu=$((vcpu * 1000 - total_cpu))
@@ -477,105 +683,151 @@ main() {
                 ;;
         esac
     done
-    
-    # Vérifications
+
+    # Vérifications système
     check_root
     check_dependencies
-    
-    # Validation du profil
-    case $PROFILE in
-        gke|eks|conservative|minimal)
-            ;;
-        *)
-            log_error "Profil invalide: $PROFILE. Valeurs acceptées: gke, eks, conservative, minimal"
-            ;;
-    esac
-    
+
+    # Validation des entrées
+    validate_profile "$PROFILE"
+    validate_density_factor "$DENSITY_FACTOR"
+
     # Détection des ressources
     log_info "Détection des ressources système..."
     VCPU=$(detect_vcpu)
-    RAM_GIB=$(detect_ram_gib)
     RAM_MIB=$(detect_ram_mib)
-    
-    log_success "Détecté: ${VCPU} vCPU, ${RAM_GIB} GiB RAM"
-    
+    RAM_GIB=$(detect_ram_gib)
+
+    log_success "Détecté: ${VCPU} vCPU, ${RAM_GIB} GiB RAM (${RAM_MIB} MiB)"
+
     # Calcul automatique du density-factor si target-pods spécifié
     if [[ -n "$TARGET_PODS" ]]; then
         log_info "Calcul automatique du density-factor pour $TARGET_PODS pods cible..."
         DENSITY_FACTOR=$(calculate_density_factor "$TARGET_PODS")
         log_success "Density-factor calculé: $DENSITY_FACTOR"
     fi
-    
+
     # Calcul des réservations selon le profil
     log_info "Calcul des réservations avec profil '$PROFILE'..."
-    
+
+    # Note: RAM_GIB peut être une décimale maintenant, on doit l'arrondir pour les calculs
+    RAM_GIB_INT=$(echo "$RAM_GIB" | cut -d. -f1)
+
     case $PROFILE in
         gke)
-            read -r SYS_CPU SYS_MEM KUBE_CPU KUBE_MEM <<< $(calculate_gke "$VCPU" "$RAM_GIB" "$RAM_MIB")
+            read -r SYS_CPU SYS_MEM KUBE_CPU KUBE_MEM <<< $(calculate_gke "$VCPU" "$RAM_GIB_INT" "$RAM_MIB")
             ;;
         eks)
-            read -r SYS_CPU SYS_MEM KUBE_CPU KUBE_MEM <<< $(calculate_eks "$VCPU" "$RAM_GIB" "$RAM_MIB")
+            read -r SYS_CPU SYS_MEM KUBE_CPU KUBE_MEM <<< $(calculate_eks "$VCPU" "$RAM_GIB_INT" "$RAM_MIB")
             ;;
         conservative)
-            read -r SYS_CPU SYS_MEM KUBE_CPU KUBE_MEM <<< $(calculate_conservative "$VCPU" "$RAM_GIB" "$RAM_MIB")
+            read -r SYS_CPU SYS_MEM KUBE_CPU KUBE_MEM <<< $(calculate_conservative "$VCPU" "$RAM_GIB_INT" "$RAM_MIB")
             ;;
         minimal)
-            read -r SYS_CPU SYS_MEM KUBE_CPU KUBE_MEM <<< $(calculate_minimal "$VCPU" "$RAM_GIB" "$RAM_MIB")
+            read -r SYS_CPU SYS_MEM KUBE_CPU KUBE_MEM <<< $(calculate_minimal "$VCPU" "$RAM_GIB_INT" "$RAM_MIB")
             ;;
     esac
-    
+
     # Application du density-factor
-    if (( $(echo "$DENSITY_FACTOR != 1.0" | bc -l) )); then
+    if [[ $(echo "$DENSITY_FACTOR != 1.0" | bc -l) -eq 1 ]]; then
         log_info "Application du density-factor ${DENSITY_FACTOR}..."
         read -r SYS_CPU SYS_MEM KUBE_CPU KUBE_MEM <<< $(apply_density_factor "$SYS_CPU" "$SYS_MEM" "$KUBE_CPU" "$KUBE_MEM" "$DENSITY_FACTOR")
     fi
-    
+
     # Affichage du résumé
     display_summary "$VCPU" "$RAM_GIB" "$SYS_CPU" "$SYS_MEM" "$KUBE_CPU" "$KUBE_MEM"
-    
+
     # Mode dry-run : afficher la config sans appliquer
     if [[ "$DRY_RUN" == true ]]; then
         log_warning "Mode DRY-RUN activé - Configuration non appliquée"
         echo ""
         echo "Configuration qui serait générée:"
         echo "───────────────────────────────────────────────────────────────────────────"
-        generate_kubelet_config "$SYS_CPU" "$SYS_MEM" "$KUBE_CPU" "$KUBE_MEM" "$VCPU" "$RAM_GIB"
+        generate_kubelet_config "$SYS_CPU" "$SYS_MEM" "$KUBE_CPU" "$KUBE_MEM" "$VCPU" "$RAM_GIB" "$RAM_MIB"
         echo ""
         log_info "Pour appliquer réellement, relancez sans --dry-run"
         exit 0
     fi
-    
-    # Backup de la configuration existante
-    if [[ "$BACKUP" == true ]] && [[ -f "$KUBELET_CONFIG" ]]; then
+
+    # Vérification et création des cgroups
+    ensure_cgroups
+
+    # Backup automatique de la configuration existante (toujours faire un backup en production)
+    BACKUP_FILE=""
+    if [[ -f "$KUBELET_CONFIG" ]]; then
         BACKUP_FILE="${KUBELET_CONFIG}.backup.$(date +%Y%m%d_%H%M%S)"
-        log_info "Sauvegarde de la configuration existante vers $BACKUP_FILE"
+        log_info "Sauvegarde automatique de la configuration existante..."
         cp "$KUBELET_CONFIG" "$BACKUP_FILE"
-        log_success "Sauvegarde créée"
+        log_success "Sauvegarde créée: $BACKUP_FILE"
     fi
-    
-    # Génération et application de la nouvelle configuration
+
+    # Génération de la nouvelle configuration dans un fichier temporaire
+    local temp_config
+    temp_config=$(mktemp /tmp/kubelet-config.XXXXXX.yaml)
+
     log_info "Génération de la nouvelle configuration kubelet..."
-    generate_kubelet_config "$SYS_CPU" "$SYS_MEM" "$KUBE_CPU" "$KUBE_MEM" "$VCPU" "$RAM_GIB" > "$KUBELET_CONFIG"
+    generate_kubelet_config "$SYS_CPU" "$SYS_MEM" "$KUBE_CPU" "$KUBE_MEM" "$VCPU" "$RAM_GIB" "$RAM_MIB" > "$temp_config"
+
+    # Validation YAML
+    validate_yaml "$temp_config"
+
+    # Application de la configuration
+    log_info "Application de la nouvelle configuration..."
+    cp "$temp_config" "$KUBELET_CONFIG"
+    rm -f "$temp_config"
     log_success "Configuration écrite dans $KUBELET_CONFIG"
-    
-    # Redémarrage du kubelet
+
+    # Redémarrage du kubelet avec rollback en cas d'échec
     log_info "Redémarrage du kubelet..."
-    if systemctl restart kubelet; then
-        log_success "Kubelet redémarré avec succès"
-    else
-        log_error "Échec du redémarrage du kubelet. Vérifiez les logs: journalctl -u kubelet -f"
+    if ! systemctl restart kubelet; then
+        log_error "Échec du redémarrage du kubelet!"
+
+        # Tentative de rollback
+        if [[ -n "$BACKUP_FILE" ]] && [[ -f "$BACKUP_FILE" ]]; then
+            log_warning "Tentative de restauration de la configuration précédente..."
+            cp "$BACKUP_FILE" "$KUBELET_CONFIG"
+
+            if systemctl restart kubelet; then
+                log_warning "Configuration restaurée, kubelet redémarré avec l'ancienne config"
+                log_error "La nouvelle configuration a causé un problème. Vérifiez les logs: journalctl -u kubelet -n 100"
+            else
+                log_error "Échec de la restauration! Vérifiez manuellement: journalctl -u kubelet -f"
+            fi
+        else
+            log_error "Pas de backup disponible pour restauration. Vérifiez les logs: journalctl -u kubelet -f"
+        fi
+
+        exit 1
     fi
-    
-    # Vérification
-    log_info "Attente de la stabilisation du kubelet (10s)..."
-    sleep 10
-    
+
+    log_success "Kubelet redémarré avec succès"
+
+    # Vérification de la stabilité
+    log_info "Vérification de la stabilité du kubelet (15s)..."
+    sleep 15
+
     if systemctl is-active --quiet kubelet; then
         log_success "✓ Kubelet actif et opérationnel"
+
+        # Nettoyage du backup si tout est OK et que l'utilisateur n'a pas demandé de backup
+        if [[ "$BACKUP" != true ]] && [[ -n "$BACKUP_FILE" ]] && [[ -f "$BACKUP_FILE" ]]; then
+            log_info "Suppression du backup temporaire (utilisez --backup pour le conserver)"
+            rm -f "$BACKUP_FILE"
+        fi
     else
-        log_error "✗ Kubelet non actif. Vérifiez les logs: journalctl -u kubelet -n 50"
+        log_error "✗ Kubelet non actif après redémarrage!"
+
+        # Rollback automatique
+        if [[ -n "$BACKUP_FILE" ]] && [[ -f "$BACKUP_FILE" ]]; then
+            log_warning "Rollback automatique en cours..."
+            cp "$BACKUP_FILE" "$KUBELET_CONFIG"
+            systemctl restart kubelet
+            log_error "Configuration restaurée. Analysez les logs: journalctl -u kubelet -n 100"
+        fi
+
+        exit 1
     fi
-    
+
     echo ""
     log_success "Configuration terminée avec succès!"
     echo ""
@@ -583,6 +835,9 @@ main() {
     echo "  1. Vérifier les logs kubelet:    journalctl -u kubelet -f"
     echo "  2. Vérifier l'allocatable:       kubectl describe node \$(hostname)"
     echo "  3. Vérifier les cgroups:         systemd-cgls | grep -E 'system.slice|kubepods'"
+    if [[ "$BACKUP" == true ]] && [[ -n "$BACKUP_FILE" ]]; then
+        echo "  4. Backup conservé:              $BACKUP_FILE"
+    fi
     echo ""
 }
 

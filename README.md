@@ -57,15 +57,19 @@ Ce script applique les **formules officielles** documentées par Google (GKE), A
 
 ### Dépendances
 
-Le script nécessite les outils suivants (installés automatiquement si manquants) :
+Le script nécessite les outils suivants :
 
 ```bash
 # Sur Debian/Ubuntu
 sudo apt update
-sudo apt install -y bc jq systemd
+sudo apt install -y bc jq systemd yq
 
 # Sur RHEL/Rocky/CentOS
-sudo dnf install -y bc jq systemd
+sudo dnf install -y bc jq systemd yq
+
+# Installer yq (si non disponible dans les repos)
+sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
+sudo chmod +x /usr/bin/yq
 ```
 
 ### Permissions
@@ -1259,6 +1263,49 @@ Ouvrez une issue sur GitHub avec :
 ---
 
 ## 📝 Changelog
+
+### v2.0.0-production (2025-10-21)
+
+**🎯 Production-Ready Enhancements** :
+- ✨ **Input Validation**: Comprehensive validation for all command-line arguments
+  - Profile validation with clear error messages
+  - Density-factor bounds checking (0.1-5.0, recommended 0.5-3.0)
+  - Target-pods positive integer validation
+- ✨ **Improved RAM Detection**: Fixed RAM detection using MiB for accuracy (fixes rounding issues)
+- ✨ **Dynamic Eviction Thresholds**: Eviction thresholds now scale with node size
+  - Small nodes (<8 GiB): 250Mi hard / 500Mi soft
+  - Medium nodes (8-32 GiB): 500Mi hard / 1Gi soft
+  - Large nodes (32-64 GiB): 1Gi hard / 2Gi soft
+  - XL nodes (>64 GiB): 2Gi hard / 4Gi soft
+- ✨ **Cgroup Verification & Creation**: Automatic detection and creation of required cgroups
+  - Detects cgroup v1 vs v2
+  - Creates kubelet.slice if missing
+  - Validates system.slice existence
+- ✨ **Automatic Rollback**: Built-in rollback mechanism on failure
+  - Automatic backup before changes
+  - Rollback on kubelet restart failure
+  - Rollback on stability check failure (15s wait)
+  - Cleanup of temporary backups on success
+- ✨ **YAML Validation**: Pre-flight validation before applying config
+  - Validates YAML syntax with yq
+  - Checks apiVersion and kind fields
+  - Prevents invalid configs from breaking kubelet
+- ✨ **Better Error Handling**: Fixed arithmetic expressions and improved reliability
+  - Fixed bc comparison in density-factor check
+  - Added zero-division protections
+  - Better error messages throughout
+
+**🔧 Code Quality** :
+- 🐛 Fixed arithmetic expression for density factor comparison (line 717)
+- 🐛 Fixed RAM detection precision issues
+- 🔒 Enhanced security with automatic backups
+- 📝 Added VERSION constant (2.0.0-production)
+- 📝 Updated documentation headers
+
+**📚 Documentation** :
+- 📚 Updated README with v2.0.0 changes
+- 📚 Added yq dependency requirement
+- 📚 Improved usage examples
 
 ### v1.0.0 (2025-01-20)
 
