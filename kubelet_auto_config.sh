@@ -1,10 +1,10 @@
 #!/bin/bash
 ################################################################################
 # Script de configuration automatique des réservations kubelet
-# Version: 2.0.8
+# Version: 2.0.9
 # Compatible: Kubernetes v1.32+, cgroups v1/v2, systemd, Ubuntu
 #
-# Voir CHANGELOG_v2.0.8.md pour l'historique complet des versions
+# Voir CHANGELOG_v2.0.8.md pour l'historique des versions précédentes
 #
 # Usage:
 #   ./kubelet_auto_config.sh [OPTIONS]
@@ -29,7 +29,7 @@
 set -euo pipefail
 
 # Version
-VERSION="2.0.8"
+VERSION="2.0.9"
 
 # Couleurs pour l'output
 RED='\033[0;31m'
