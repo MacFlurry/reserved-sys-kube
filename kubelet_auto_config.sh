@@ -1,8 +1,16 @@
 #!/bin/bash
 ################################################################################
 # Script de configuration automatique des réservations kubelet
-# Version: 2.0.7
+# Version: 2.0.8
 # Compatible Kubernetes v1.32+, cgroups v1/v2, systemd
+# Améliorations v2.0.8:
+#   - FIX CRITIQUE: Arithmétique décimale (support ARM64 avec RAM=3.80 GiB)
+#   - FIX CRITIQUE: Gestion lock file global avec cleanup robuste
+#   - FIX: Formatage YAML sans décimales résiduelles
+#   - AJOUT: Fonction validate_calculated_value() pour fail-fast
+#   - AJOUT: Hook pre-commit anti-BOM UTF-8
+#   - AJOUT: Suite de 25 tests unitaires
+#
 # Améliorations v2.0.7:
 #   - Support limité à Ubuntu (vérification /etc/os-release)
 #   - Simplification de la création kubelet.slice (systemd à la demande)
@@ -67,7 +75,7 @@
 set -euo pipefail
 
 # Version
-VERSION="2.0.6"
+VERSION="2.0.8"
 
 # Couleurs pour l'output
 RED='\033[0;31m'
@@ -83,6 +91,17 @@ TARGET_PODS=""
 DRY_RUN=false
 BACKUP=false
 KUBELET_CONFIG="/var/lib/kubelet/config.yaml"
+LOCK_FILE="/var/lock/kubelet-auto-config.lock"
+
+# Fonction de nettoyage pour le trap
+cleanup() {
+    if [[ -n "${LOCK_FILE:-}" ]] && [[ -d "$LOCK_FILE" ]]; then
+        rm -rf "$LOCK_FILE" 2>/dev/null || true
+    fi
+}
+
+# Enregistrer le trap dès le début
+trap cleanup EXIT
 
 ################################################################################
 # Fonctions utilitaires
@@ -129,11 +148,22 @@ check_os() {
 }
 
 acquire_lock() {
-    local lock_file="/var/lock/kubelet-auto-config.lock"
     local timeout=30
     local elapsed=0
 
-    while ! mkdir "$lock_file" 2>/dev/null; do
+    # Nettoyage préventif si le lock est un dossier orphelin
+    if [[ -d "$LOCK_FILE" ]]; then
+        local lock_pid
+        lock_pid=$(cat "$LOCK_FILE/pid" 2>/dev/null || echo "")
+
+        # Vérifier si le processus existe encore
+        if [[ -n "$lock_pid" ]] && ! kill -0 "$lock_pid" 2>/dev/null; then
+            log_warning "Lock file orphelin détecté (PID $lock_pid mort), nettoyage..."
+            rm -rf "$LOCK_FILE"
+        fi
+    fi
+
+    while ! mkdir "$LOCK_FILE" 2>/dev/null; do
         if (( elapsed >= timeout )); then
             log_error "Un autre processus exécute déjà ce script (timeout après ${timeout}s)"
         fi
@@ -142,9 +172,7 @@ acquire_lock() {
         ((elapsed += 2))
     done
 
-    echo $$ > "$lock_file/pid"
-    trap 'rm -rf "$lock_file"' EXIT
-
+    echo $$ > "$LOCK_FILE/pid"
     log_info "Lock acquis (PID $$)"
 }
 
@@ -191,6 +219,27 @@ validate_density_factor() {
 
     if (( $(echo "$factor < 0.5 || $factor > 3.0" | bc -l) )); then
         log_warning "Le density-factor $factor est hors de la plage recommandée (0.5-3.0)"
+    fi
+}
+
+validate_calculated_value() {
+    local value=$1
+    local name=$2
+    local min=${3:-0}
+
+    # Vérifier que la valeur n'est pas vide
+    if [[ -z "$value" ]]; then
+        log_error "Calcul invalide pour $name: valeur vide"
+    fi
+
+    # Vérifier que c'est un nombre entier valide
+    if ! [[ "$value" =~ ^[0-9]+$ ]]; then
+        log_error "Calcul invalide pour $name: '$value' n'est pas un entier valide"
+    fi
+
+    # Vérifier le minimum
+    if (( value < min )); then
+        log_error "Calcul invalide pour $name: $value < $min (minimum requis)"
     fi
 }
 
@@ -287,7 +336,11 @@ calculate_gke() {
     local vcpu=$1
     local ram_gib=$2
     local ram_mib=$3
-    
+
+    # Normaliser ram_gib en entier pour calculs arithmétiques bash
+    local ram_gib_int
+    ram_gib_int=$(printf "%.0f" "$ram_gib")
+
     # system-reserved CPU
     local sys_cpu
     if (( vcpu <= 2 )); then
@@ -299,18 +352,18 @@ calculate_gke() {
     else
         sys_cpu=$((460 + (vcpu - 32) * 5))
     fi
-    
+
     # system-reserved Memory
     local sys_mem_base=100
     local sys_mem_percent
-    if (( ram_gib < 64 )); then
-        sys_mem_percent=$(echo "scale=0; $ram_mib * 0.01" | bc)
+    if (( ram_gib_int < 64 )); then
+        sys_mem_percent=$(echo "scale=0; $ram_mib * 0.01 / 1" | bc)
     else
-        sys_mem_percent=$(echo "scale=0; $ram_mib * 0.005" | bc)
+        sys_mem_percent=$(echo "scale=0; $ram_mib * 0.005 / 1" | bc)
     fi
-    local sys_mem_kernel=$((ram_gib * 11))
+    local sys_mem_kernel=$((ram_gib_int * 11))
     local sys_mem=$((sys_mem_base + sys_mem_percent + sys_mem_kernel))
-    
+
     # kube-reserved CPU
     local kube_cpu_base=60
     local kube_cpu_dynamic=$((vcpu * 10))
@@ -318,17 +371,17 @@ calculate_gke() {
         kube_cpu_dynamic=40
     fi
     local kube_cpu=$((kube_cpu_base + kube_cpu_dynamic))
-    
+
     # kube-reserved Memory
     local kube_mem_base=255
     local kube_mem_dynamic
-    if (( ram_gib <= 64 )); then
-        kube_mem_dynamic=$((ram_gib * 11))
+    if (( ram_gib_int <= 64 )); then
+        kube_mem_dynamic=$((ram_gib_int * 11))
     else
-        kube_mem_dynamic=$((64 * 11 + (ram_gib - 64) * 8))
+        kube_mem_dynamic=$((64 * 11 + (ram_gib_int - 64) * 8))
     fi
     local kube_mem=$((kube_mem_base + kube_mem_dynamic))
-    
+
     echo "$sys_cpu $sys_mem $kube_cpu $kube_mem"
 }
 
@@ -337,7 +390,11 @@ calculate_eks() {
     local vcpu=$1
     local ram_gib=$2
     local ram_mib=$3
-    
+
+    # Normaliser ram_gib en entier pour calculs arithmétiques bash
+    local ram_gib_int
+    ram_gib_int=$(printf "%.0f" "$ram_gib")
+
     # system-reserved CPU (paliers)
     local sys_cpu
     local sys_mem_percent
@@ -351,10 +408,11 @@ calculate_eks() {
         sys_cpu=400
         sys_mem_percent="0.02"
     fi
-    
+
     # system-reserved Memory
-    local sys_mem=$(echo "scale=0; 100 + ($ram_mib * $sys_mem_percent)" | bc)
-    
+    local sys_mem
+    sys_mem=$(echo "scale=0; (100 + ($ram_mib * $sys_mem_percent)) / 1" | bc)
+
     # kube-reserved CPU
     local kube_cpu
     if (( vcpu < 8 )); then
@@ -364,10 +422,10 @@ calculate_eks() {
     else
         kube_cpu=$((150 + vcpu * 15))
     fi
-    
+
     # kube-reserved Memory
-    local kube_mem=$((255 + ram_gib * 11))
-    
+    local kube_mem=$((255 + ram_gib_int * 11))
+
     echo "$sys_cpu $sys_mem $kube_cpu $kube_mem"
 }
 
@@ -376,19 +434,23 @@ calculate_conservative() {
     local vcpu=$1
     local ram_gib=$2
     local ram_mib=$3
-    
+
     # system-reserved CPU
-    local sys_cpu=$(echo "scale=0; 500 + ($vcpu * 1000 * 0.01)" | bc)
-    
+    local sys_cpu
+    sys_cpu=$(echo "scale=0; (500 + ($vcpu * 1000 * 0.01)) / 1" | bc)
+
     # system-reserved Memory
-    local sys_mem=$(echo "scale=0; 1024 + ($ram_mib * 0.02)" | bc)
-    
+    local sys_mem
+    sys_mem=$(echo "scale=0; (1024 + ($ram_mib * 0.02)) / 1" | bc)
+
     # kube-reserved CPU
-    local kube_cpu=$(echo "scale=0; 500 + ($vcpu * 1000 * 0.015)" | bc)
-    
+    local kube_cpu
+    kube_cpu=$(echo "scale=0; (500 + ($vcpu * 1000 * 0.015)) / 1" | bc)
+
     # kube-reserved Memory
-    local kube_mem=$(echo "scale=0; 1024 + ($ram_mib * 0.05)" | bc)
-    
+    local kube_mem
+    kube_mem=$(echo "scale=0; (1024 + ($ram_mib * 0.05)) / 1" | bc)
+
     echo "$sys_cpu $sys_mem $kube_cpu $kube_mem"
 }
 
@@ -397,7 +459,11 @@ calculate_minimal() {
     local vcpu=$1
     local ram_gib=$2
     local ram_mib=$3
-    
+
+    # Normaliser ram_gib en entier pour calculs arithmétiques bash
+    local ram_gib_int
+    ram_gib_int=$(printf "%.0f" "$ram_gib")
+
     # system-reserved CPU
     local sys_cpu
     if (( vcpu < 8 )); then
@@ -405,16 +471,16 @@ calculate_minimal() {
     else
         sys_cpu=150
     fi
-    
+
     # system-reserved Memory
-    local sys_mem=$((256 + ram_gib * 8))
-    
+    local sys_mem=$((256 + ram_gib_int * 8))
+
     # kube-reserved CPU
     local kube_cpu=$((60 + vcpu * 5))
-    
+
     # kube-reserved Memory
-    local kube_mem=$((256 + ram_gib * 8))
-    
+    local kube_mem=$((256 + ram_gib_int * 8))
+
     echo "$sys_cpu $sys_mem $kube_cpu $kube_mem"
 }
 
@@ -428,12 +494,13 @@ apply_density_factor() {
     local kube_cpu=$3
     local kube_mem=$4
     local factor=$5
-    
-    sys_cpu=$(echo "scale=0; $sys_cpu * $factor" | bc | cut -d. -f1)
-    sys_mem=$(echo "scale=0; $sys_mem * $factor" | bc | cut -d. -f1)
-    kube_cpu=$(echo "scale=0; $kube_cpu * $factor" | bc | cut -d. -f1)
-    kube_mem=$(echo "scale=0; $kube_mem * $factor" | bc | cut -d. -f1)
-    
+
+    # Appliquer le facteur et forcer la conversion en entier (sans décimales)
+    sys_cpu=$(printf "%.0f" "$(echo "$sys_cpu * $factor" | bc)")
+    sys_mem=$(printf "%.0f" "$(echo "$sys_mem * $factor" | bc)")
+    kube_cpu=$(printf "%.0f" "$(echo "$kube_cpu * $factor" | bc)")
+    kube_mem=$(printf "%.0f" "$(echo "$kube_mem * $factor" | bc)")
+
     echo "$sys_cpu $sys_mem $kube_cpu $kube_mem"
 }
 
@@ -983,10 +1050,22 @@ main() {
             ;;
     esac
 
+    # Validation des valeurs calculées
+    validate_calculated_value "$SYS_CPU" "system-reserved CPU" 50
+    validate_calculated_value "$SYS_MEM" "system-reserved Memory" 100
+    validate_calculated_value "$KUBE_CPU" "kube-reserved CPU" 50
+    validate_calculated_value "$KUBE_MEM" "kube-reserved Memory" 100
+
     # Application du density-factor
     if [[ $(echo "$DENSITY_FACTOR != 1.0" | bc -l) -eq 1 ]]; then
         log_info "Application du density-factor ${DENSITY_FACTOR}..."
         read -r SYS_CPU SYS_MEM KUBE_CPU KUBE_MEM <<< $(apply_density_factor "$SYS_CPU" "$SYS_MEM" "$KUBE_CPU" "$KUBE_MEM" "$DENSITY_FACTOR")
+
+        # Re-validation après application du facteur
+        validate_calculated_value "$SYS_CPU" "system-reserved CPU (après facteur)" 50
+        validate_calculated_value "$SYS_MEM" "system-reserved Memory (après facteur)" 100
+        validate_calculated_value "$KUBE_CPU" "kube-reserved CPU (après facteur)" 50
+        validate_calculated_value "$KUBE_MEM" "kube-reserved Memory (après facteur)" 100
     fi
 
     # Validation: s'assurer que l'allocatable n'est pas négatif
