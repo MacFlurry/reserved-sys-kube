@@ -1396,7 +1396,9 @@ Ouvrez une issue sur GitHub avec :
 
 Pour l'historique complet des versions, consultez les fichiers de changelog dédiés :
 
-- **[CHANGELOG_v2.0.8.md](CHANGELOG_v2.0.8.md)** - Version actuelle (correctifs critiques ARM64)
+- **[CHANGELOG_v2.0.10.md](CHANGELOG_v2.0.10.md)** - Version actuelle (correctifs tests critiques)
+- **[CHANGELOG_v2.0.9.md](CHANGELOG_v2.0.9.md)** - Amélioration UX suite de tests
+- **[CHANGELOG_v2.0.8.md](CHANGELOG_v2.0.8.md)** - Correctifs critiques ARM64
 - Versions précédentes : voir le dossier `changelogs/` (si créé)
 
 ### Version Actuelle : v2.0.10
@@ -1408,7 +1410,7 @@ Pour l'historique complet des versions, consultez les fichiers de changelog déd
 - ✅ Suite de tests unitaires (25 tests)
 - ✅ Tests compatibles `set -euo pipefail`
 
-Voir [CHANGELOG_v2.0.8.md](CHANGELOG_v2.0.8.md) pour les détails complets.
+Voir [CHANGELOG_v2.0.10.md](CHANGELOG_v2.0.10.md), [CHANGELOG_v2.0.9.md](CHANGELOG_v2.0.9.md) et [CHANGELOG_v2.0.8.md](CHANGELOG_v2.0.8.md) pour les détails complets.
 
 ---
 ## 📄 Licence
