@@ -1,8 +1,14 @@
 #!/bin/bash
 ################################################################################
 # Script de configuration automatique des réservations kubelet
-# Version: 2.0.5
+# Version: 2.0.6
 # Compatible Kubernetes v1.32+, cgroups v1/v2, systemd
+#
+# Améliorations v2.0.6:
+#   - Attachement automatique du service kubelet à kubelet.slice (CRITIQUE)
+#   - Enforcement effectif de kube-reserved sur le kubelet lui-même
+#   - Validation post-redémarrage de l'attachement au bon cgroup
+#   - Création automatique du drop-in systemd si nécessaire
 #
 # Améliorations v2.0.5:
 #   - Merge intelligent avec configuration existante (préservation des tweaks)
@@ -56,7 +62,7 @@
 set -euo pipefail
 
 # Version
-VERSION="2.0.5"
+VERSION="2.0.6"
 
 # Couleurs pour l'output
 RED='\033[0;31m'
@@ -467,6 +473,114 @@ EOF
         # Pour cgroup v1
         log_warning "Cgroup v1 détecté. Assurez-vous que les cgroups sont configurés manuellement si nécessaire."
     fi
+}
+
+################################################################################
+# Attachement du service kubelet à kubelet.slice
+################################################################################
+
+ensure_kubelet_slice_attachment() {
+    log_info "Vérification de l'attachement du service kubelet à kubelet.slice..."
+
+    # Vérifier si kubelet.service existe
+    if ! systemctl cat kubelet.service &>/dev/null; then
+        log_warning "Le service kubelet.service n'existe pas encore sur ce système"
+        log_warning "L'attachement à kubelet.slice devra être configuré manuellement après installation de kubelet"
+        return 0
+    fi
+
+    # Vérifier l'attachement actuel du service kubelet
+    local current_slice
+    current_slice=$(systemctl show kubelet.service -p Slice --value 2>/dev/null)
+
+    if [[ "$current_slice" == "kubelet.slice" ]]; then
+        log_success "Service kubelet déjà attaché à kubelet.slice"
+        return 0
+    fi
+
+    # Le kubelet n'est pas dans la bonne slice
+    log_warning "Service kubelet actuellement dans : ${current_slice:-system.slice}"
+    log_info "Configuration de l'attachement à kubelet.slice..."
+
+    # Créer le répertoire drop-in si nécessaire
+    local dropin_dir="/etc/systemd/system/kubelet.service.d"
+    mkdir -p "$dropin_dir"
+
+    # Créer le drop-in pour attacher kubelet à kubelet.slice
+    local dropin_file="${dropin_dir}/11-kubelet-slice.conf"
+
+    cat > "$dropin_file" <<'EOF'
+# Configuration automatique des réservations kubelet
+# Attache le service kubelet à kubelet.slice pour l'enforcement de kube-reserved
+# Généré automatiquement par kubelet_auto_config.sh
+
+[Service]
+# Placer kubelet dans kubelet.slice au lieu de system.slice
+Slice=kubelet.slice
+
+# S'assurer que la slice existe avant de démarrer kubelet
+After=kubelet.slice
+Requires=kubelet.slice
+EOF
+
+    log_success "Drop-in systemd créé : $dropin_file"
+
+    # Recharger la configuration systemd
+    log_info "Rechargement de la configuration systemd..."
+    systemctl daemon-reload
+
+    # Vérifier que le changement est pris en compte
+    local new_slice
+    new_slice=$(systemctl show kubelet.service -p Slice --value 2>/dev/null)
+
+    if [[ "$new_slice" == "kubelet.slice" ]]; then
+        log_success "Service kubelet configuré pour s'attacher à kubelet.slice"
+        log_info "  → Le changement prendra effet au prochain redémarrage du kubelet"
+    else
+        log_error "Échec de la configuration de l'attachement (slice détectée: $new_slice)"
+    fi
+}
+
+################################################################################
+# Validation de l'attachement effectif du kubelet
+################################################################################
+
+validate_kubelet_slice_attachment() {
+    log_info "Validation de l'attachement effectif du kubelet à kubelet.slice..."
+
+    # Attendre un peu que le kubelet démarre complètement
+    sleep 3
+
+    # Vérifier le slice effectif via systemctl
+    local effective_slice
+    effective_slice=$(systemctl show kubelet.service -p Slice --value 2>/dev/null)
+
+    if [[ "$effective_slice" == "kubelet.slice" ]]; then
+        log_success "✓ Service kubelet correctement attaché à kubelet.slice"
+    else
+        log_error "✗ Service kubelet PAS dans kubelet.slice (détecté: ${effective_slice:-N/A})"
+        log_error "  → kube-reserved ne sera PAS appliqué au kubelet lui-même!"
+        log_error "  → Vérifiez : systemctl status kubelet | grep Cgroup"
+        return 1
+    fi
+
+    # Vérifier via le cgroup réel du processus kubelet
+    local kubelet_pid
+    kubelet_pid=$(systemctl show kubelet.service -p MainPID --value 2>/dev/null)
+
+    if [[ -n "$kubelet_pid" ]] && [[ "$kubelet_pid" != "0" ]]; then
+        local kubelet_cgroup
+        kubelet_cgroup=$(cat "/proc/$kubelet_pid/cgroup" 2>/dev/null | grep -E '0::|0:/' | cut -d: -f3)
+
+        if echo "$kubelet_cgroup" | grep -q "kubelet.slice"; then
+            log_success "✓ Processus kubelet (PID $kubelet_pid) dans le bon cgroup"
+            log_info "  → Cgroup: $kubelet_cgroup"
+        else
+            log_warning "✗ Processus kubelet dans un cgroup inattendu: $kubelet_cgroup"
+        fi
+    fi
+
+    return 0
 }
 
 ################################################################################
@@ -917,6 +1031,9 @@ main() {
     # Vérification et création des cgroups
     ensure_cgroups
 
+    # Configuration de l'attachement du service kubelet à kubelet.slice
+    ensure_kubelet_slice_attachment
+
     # Backup automatique de la configuration existante (toujours faire un backup en production)
     BACKUP_FILE=""
     if [[ -f "$KUBELET_CONFIG" ]]; then
@@ -975,6 +1092,9 @@ main() {
 
     if systemctl is-active --quiet kubelet; then
         log_success "✓ Kubelet actif et opérationnel"
+
+        # Validation de l'attachement effectif du kubelet à kubelet.slice
+        validate_kubelet_slice_attachment
 
         # Gestion intelligente du backup avec rotation
         if [[ -n "$BACKUP_FILE" ]] && [[ -f "$BACKUP_FILE" ]]; then
