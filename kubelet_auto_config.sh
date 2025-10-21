@@ -2,55 +2,9 @@
 ################################################################################
 # Script de configuration automatique des réservations kubelet
 # Version: 2.0.8
-# Compatible Kubernetes v1.32+, cgroups v1/v2, systemd
-# Améliorations v2.0.8:
-#   - FIX CRITIQUE: Arithmétique décimale (support ARM64 avec RAM=3.80 GiB)
-#   - FIX CRITIQUE: Gestion lock file global avec cleanup robuste
-#   - FIX: Formatage YAML sans décimales résiduelles
-#   - AJOUT: Fonction validate_calculated_value() pour fail-fast
-#   - AJOUT: Hook pre-commit anti-BOM UTF-8
-#   - AJOUT: Suite de 25 tests unitaires
+# Compatible: Kubernetes v1.32+, cgroups v1/v2, systemd, Ubuntu
 #
-# Améliorations v2.0.7:
-#   - Support limité à Ubuntu (vérification /etc/os-release)
-#   - Simplification de la création kubelet.slice (systemd à la demande)
-#   - Drop-in systemd corrigé pour attacher kubelet à kubelet.slice
-#   - Rollback kubelet fiable même en cas d'échec de restart
-#
-# Améliorations v2.0.6:
-#   - Attachement automatique du service kubelet à kubelet.slice (CRITIQUE)
-#   - Enforcement effectif de kube-reserved sur le kubelet lui-même
-#   - Validation post-redémarrage de l'attachement au bon cgroup
-#   - Création automatique du drop-in systemd si nécessaire
-#
-# Améliorations v2.0.5:
-#   - Merge intelligent avec configuration existante (préservation des tweaks)
-#   - Modification ciblée uniquement des champs gérés par le script
-#   - Support pour configurations personnalisées (maxPods, imageGC, etc.)
-#
-# Améliorations v2.0.4:
-#   - Protection contre les race conditions (lock file)
-#   - Validation robuste de RAM_GIB_INT avec fallback
-#   - Détection et blocage des allocatables négatifs
-#   - Portabilité BSD/macOS pour mktemp
-#
-# Améliorations v2.0.3:
-#   - Rotation des backups (4 derniers changements réussis)
-#   - Historique de rollback multi-niveaux (.last-success.{0,1,2,3})
-#   - Conservation permanente des backups --backup (90 jours)
-#
-# Améliorations v2.0.2:
-#   - Conservation intelligente des backups (.last-success)
-#   - Auto-nettoyage des anciens backups timestampés (>30j)
-#
-# Améliorations v2.0.0:
-#   - Validation complète des entrées
-#   - Détection RAM améliorée (précision MiB)
-#   - Seuils d'éviction dynamiques selon la taille du nœud
-#   - Vérification et création automatique des cgroups
-#   - Rollback automatique en cas d'échec
-#   - Validation YAML avant application
-#   - Backup automatique de sécurité
+# Voir CHANGELOG_v2.0.8.md pour l'historique complet des versions
 #
 # Usage:
 #   ./kubelet_auto_config.sh [OPTIONS]
@@ -125,7 +79,8 @@ log_error() {
 }
 
 usage() {
-    head -n 25 "$0" | grep "^#" | sed 's/^# //' | sed 's/^#//'
+    # Afficher uniquement la section Usage jusqu'à Dépendances
+    sed -n '/^# Usage:/,/^# Dépendances:/p' "$0" | grep "^#" | sed 's/^# //' | sed 's/^#//'
     exit 0
 }
 
