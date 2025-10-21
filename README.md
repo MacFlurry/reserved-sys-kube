@@ -1476,5 +1476,5 @@ SOFTWARE.
 ---
 
 **Dernière mise à jour** : 21 oct 2025
-**Version du README** : 2.0.6
+**Version du script** : 2.0.8
 **Mainteneur** : Platform Engineering Team
