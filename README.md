@@ -1356,6 +1356,162 @@ Ouvrez une issue sur GitHub avec :
 
 ## 📝 Changelog et Notes de Version
 
+### v2.0.6 (2025-10-21)
+
+**🔗 Attachement Automatique du Service Kubelet à kubelet.slice (CRITIQUE)**
+
+Cette version corrige un **bug critique** découvert : le service `kubelet.service` n'était **pas attaché** à `kubelet.slice`, rendant l'enforcement de `kube-reserved` **ineffectif** sur le kubelet lui-même.
+
+#### Problème Critique Identifié
+
+**Avant v2.0.6** :
+```bash
+# Configuration kubelet correcte
+kubeReservedCgroup: "/kubelet.slice"  # ✅ Configuré dans config.yaml
+
+# MAIS le service kubelet n'est pas dans cette slice !
+$ systemctl status kubelet | grep Cgroup
+CGroup: /system.slice/kubelet.service  # ❌ Mauvais slice !
+
+# Résultat : kube-reserved N'EST PAS appliqué au kubelet
+```
+
+**Impact** :
+- ❌ Le kubelet peut consommer toute la CPU/mémoire du nœud
+- ❌ Pas de protection contre un kubelet défaillant ou surchargé
+- ❌ Les réservations `kube-reserved` sont **ignorées** pour le processus kubelet
+- ❌ Risque de crash du nœud si le kubelet consomme trop de ressources
+
+#### Solution Implémentée
+
+**Attachement automatique via drop-in systemd** :
+
+Le script crée maintenant automatiquement `/etc/systemd/system/kubelet.service.d/11-kubelet-slice.conf` :
+
+```ini
+# Configuration automatique des réservations kubelet
+# Attache le service kubelet à kubelet.slice pour l'enforcement de kube-reserved
+# Généré automatiquement par kubelet_auto_config.sh
+
+[Service]
+# Placer kubelet dans kubelet.slice au lieu de system.slice
+Slice=kubelet.slice
+
+# S'assurer que la slice existe avant de démarrer kubelet
+After=kubelet.slice
+Requires=kubelet.slice
+```
+
+**Workflow du script** :
+
+1. **Détection de l'attachement actuel**
+   ```bash
+   $ systemctl show kubelet.service -p Slice --value
+   system.slice  # ← Détection du problème
+   ```
+
+2. **Création du drop-in systemd**
+   - Création de `/etc/systemd/system/kubelet.service.d/11-kubelet-slice.conf`
+   - Configuration `Slice=kubelet.slice`
+   - Ajout des dépendances `After=` et `Requires=`
+
+3. **Reload et redémarrage**
+   ```bash
+   systemctl daemon-reload
+   systemctl restart kubelet
+   ```
+
+4. **Validation post-redémarrage**
+   ```bash
+   # Validation via systemctl
+   $ systemctl show kubelet.service -p Slice --value
+   kubelet.slice  # ✅ Correct !
+
+   # Validation via cgroup du processus
+   $ cat /proc/$(pidof kubelet)/cgroup | grep kubelet.slice
+   0::/kubelet.slice/kubelet.service  # ✅ Dans le bon cgroup !
+   ```
+
+#### Exemple de Sortie du Script
+
+**Première exécution (attachement manquant)** :
+```bash
+$ sudo ./kubelet_auto_config.sh --profile conservative
+
+[INFO] Vérification de l'attachement du service kubelet à kubelet.slice...
+[WARNING] Service kubelet actuellement dans : system.slice
+[INFO] Configuration de l'attachement à kubelet.slice...
+[SUCCESS] Drop-in systemd créé : /etc/systemd/system/kubelet.service.d/11-kubelet-slice.conf
+[INFO] Rechargement de la configuration systemd...
+[SUCCESS] Service kubelet configuré pour s'attacher à kubelet.slice
+[INFO]   → Le changement prendra effet au prochain redémarrage du kubelet
+
+[INFO] Redémarrage du kubelet...
+[SUCCESS] Kubelet redémarré avec succès
+
+[INFO] Validation de l'attachement effectif du kubelet à kubelet.slice...
+[SUCCESS] ✓ Service kubelet correctement attaché à kubelet.slice
+[SUCCESS] ✓ Processus kubelet (PID 12345) dans le bon cgroup
+[INFO]   → Cgroup: /kubelet.slice/kubelet.service
+```
+
+**Exécutions suivantes (attachement déjà OK)** :
+```bash
+$ sudo ./kubelet_auto_config.sh --profile conservative
+
+[INFO] Vérification de l'attachement du service kubelet à kubelet.slice...
+[SUCCESS] Service kubelet déjà attaché à kubelet.slice
+```
+
+#### Cas Particuliers Gérés
+
+1. **Kubelet pas encore installé** :
+   ```bash
+   [WARNING] Le service kubelet.service n'existe pas encore sur ce système
+   [WARNING] L'attachement à kubelet.slice devra être configuré manuellement après installation de kubelet
+   ```
+
+2. **Drop-in déjà présent** :
+   - Le script détecte si l'attachement est déjà correct
+   - Pas de modification inutile
+
+3. **Validation double** :
+   - Via `systemctl show` (configuration systemd)
+   - Via `/proc/PID/cgroup` (cgroup effectif du processus)
+
+#### Impact
+
+- ✅ **Enforcement effectif de kube-reserved** : Le kubelet est maintenant limité en CPU/mémoire
+- ✅ **Protection du nœud** : Le kubelet ne peut plus consommer toutes les ressources
+- ✅ **Conformité avec la spécification Kubernetes** : Configuration correcte des cgroups
+- ✅ **Validation complète** : Double vérification de l'attachement effectif
+
+#### Vérification Manuelle
+
+Pour vérifier que l'attachement fonctionne :
+
+```bash
+# 1. Vérifier la configuration systemd
+systemctl show kubelet.service -p Slice --value
+# Devrait afficher : kubelet.slice
+
+# 2. Vérifier le cgroup du processus
+systemctl status kubelet | grep Cgroup
+# Devrait afficher : CGroup: /kubelet.slice/kubelet.service
+
+# 3. Vérifier via /proc
+cat /proc/$(pgrep -x kubelet)/cgroup
+# Devrait contenir : /kubelet.slice/kubelet.service
+
+# 4. Vérifier les limites effectives
+systemd-cgls kubelet.slice
+# Devrait montrer le processus kubelet
+```
+
+**Recommandation de mise à niveau** : 🚨 **CRITIQUE** - Mise à niveau **obligatoire** pour toutes les installations. Sans ce correctif, `kube-reserved` n'est **PAS appliqué** au kubelet.
+
+---
+
 ### v2.0.5 (2025-10-21)
 
 **🔀 Merge Intelligent - Préservation des Tweaks Existants**
@@ -2118,5 +2274,5 @@ SOFTWARE.
 ---
 
 **Dernière mise à jour** : 21 oct 2025
-**Version du README** : 2.0.5
+**Version du README** : 2.0.6
 **Mainteneur** : Platform Engineering Team
