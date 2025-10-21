@@ -133,6 +133,7 @@ sudo ./kubelet_auto_config.sh [OPTIONS]
 | `--profile <profil>` | Profil de calcul : `gke`, `eks`, `conservative`, `minimal` | `gke` |
 | `--density-factor <float>` | Multiplicateur pour haute densité (0.1 à 5.0, recommandé 0.5-3.0) | `1.0` |
 | `--target-pods <int>` | Nombre de pods cible (calcul auto du density-factor) | - |
+| `--node-type <type>` | Type de nœud : `control-plane`, `worker`, `auto` (détection auto) | `auto` |
 | `--dry-run` | Affiche la configuration sans l'appliquer | `false` |
 | `--backup` | Crée un backup permanent timestampé (en plus des 4 backups rotatifs automatiques) | `false` |
 | `--help` | Affiche l'aide | - |
@@ -218,6 +219,65 @@ sudo ./kubelet_auto_config.sh --profile conservative
 **Exemple** :
 ```bash
 sudo ./kubelet_auto_config.sh --profile minimal --dry-run
+```
+
+---
+
+## 🖥️ Détection automatique Control-Plane vs Worker
+
+### Pourquoi cette distinction ?
+
+Le script détecte automatiquement le type de nœud et adapte la configuration `enforceNodeAllocatable` :
+
+| Type | enforceNodeAllocatable | Raison |
+|------|------------------------|--------|
+| **Control-plane** | `["pods", "system-reserved"]` | Les static pods critiques (kube-apiserver, etcd, etc.) doivent démarrer **avant** le kubelet. Si `kube-reserved` est enforced, ces pods ne peuvent pas démarrer → cluster cassé. |
+| **Worker** | `["pods", "system-reserved", "kube-reserved"]` | Enforcement complet recommandé pour maximiser la stabilité. |
+
+### Détection automatique (par défaut)
+
+Le script détecte automatiquement le type en vérifiant la présence de static pods dans `/etc/kubernetes/manifests/` :
+
+```bash
+# Exécution normale (détection auto)
+sudo ./kubelet_auto_config.sh
+
+# Sortie sur un control-plane :
+# [INFO] Détection du type de nœud...
+# [SUCCESS] Nœud détecté: CONTROL-PLANE (static pods détectés dans /etc/kubernetes/manifests)
+# [WARNING] Mode control-plane: kube-reserved ne sera PAS enforced (pour préserver les static pods critiques)
+
+# Sortie sur un worker :
+# [INFO] Détection du type de nœud...
+# [SUCCESS] Nœud détecté: WORKER (aucun static pod control-plane trouvé)
+# [INFO] Mode worker: kube-reserved sera enforced normalement
+```
+
+### Override manuel (si nécessaire)
+
+Dans de rares cas, vous pouvez forcer le type manuellement :
+
+```bash
+# Forcer mode control-plane
+sudo ./kubelet_auto_config.sh --node-type control-plane
+
+# Forcer mode worker
+sudo ./kubelet_auto_config.sh --node-type worker
+
+# Mode auto (par défaut, peut être omis)
+sudo ./kubelet_auto_config.sh --node-type auto
+```
+
+### Important : Control-planes avec taints
+
+Si vos control-planes ont des **taints** et n'exécutent jamais de workloads utilisateur, vous pouvez réduire les réservations :
+
+```bash
+# Control-plane dédié (pas de workloads)
+sudo ./kubelet_auto_config.sh --profile minimal --node-type control-plane
+
+# Control-plane mixte (avec workloads)
+sudo ./kubelet_auto_config.sh --profile gke --node-type control-plane
 ```
 
 ---
@@ -1396,21 +1456,29 @@ Ouvrez une issue sur GitHub avec :
 
 Pour l'historique complet des versions, consultez les fichiers de changelog dédiés :
 
-- **[CHANGELOG_v2.0.10.md](CHANGELOG_v2.0.10.md)** - Version actuelle (correctifs tests critiques)
+- **[CHANGELOG_v2.0.11.md](CHANGELOG_v2.0.11.md)** - Version actuelle (détection auto control-plane/worker)
+- **[CHANGELOG_v2.0.10.md](CHANGELOG_v2.0.10.md)** - Correctifs tests critiques
 - **[CHANGELOG_v2.0.9.md](CHANGELOG_v2.0.9.md)** - Amélioration UX suite de tests
 - **[CHANGELOG_v2.0.8.md](CHANGELOG_v2.0.8.md)** - Correctifs critiques ARM64
 - Versions précédentes : voir le dossier `changelogs/` (si créé)
 
-### Version Actuelle : v2.0.10
+### Version Actuelle : v2.0.11
 
-**Correctifs critiques :**
+**Nouveautés :**
+- ✅ Détection automatique du type de nœud (control-plane vs worker)
+- ✅ Adaptation intelligente de `enforceNodeAllocatable` selon le type
+- ✅ Option `--node-type` pour override manuel
+- ✅ Prévention des crashes de kube-apiserver sur control-planes
+- ✅ Rétrocompatible : comportement par défaut optimal pour tous les nœuds
+
+**Hérité de v2.0.10 :**
 - ✅ Support ARM64 (arithmétique décimale)
 - ✅ Lock file robuste
 - ✅ Formatage YAML propre
 - ✅ Suite de tests unitaires (25 tests)
 - ✅ Tests compatibles `set -euo pipefail`
 
-Voir [CHANGELOG_v2.0.10.md](CHANGELOG_v2.0.10.md), [CHANGELOG_v2.0.9.md](CHANGELOG_v2.0.9.md) et [CHANGELOG_v2.0.8.md](CHANGELOG_v2.0.8.md) pour les détails complets.
+Voir [CHANGELOG_v2.0.11.md](CHANGELOG_v2.0.11.md) pour les détails complets.
 
 ---
 ## 📄 Licence
@@ -1479,5 +1547,5 @@ SOFTWARE.
 ---
 
 **Dernière mise à jour** : 21 oct 2025
-**Version du script** : 2.0.10
+**Version du script** : 2.0.11
 **Mainteneur** : Platform Engineering Team
