@@ -1,8 +1,13 @@
 #!/bin/bash
 ################################################################################
 # Script de configuration automatique des réservations kubelet
-# Version: 2.0.6
+# Version: 2.0.7
 # Compatible Kubernetes v1.32+, cgroups v1/v2, systemd
+# Améliorations v2.0.7:
+#   - Support limité à Ubuntu (vérification /etc/os-release)
+#   - Simplification de la création kubelet.slice (systemd à la demande)
+#   - Drop-in systemd corrigé pour attacher kubelet à kubelet.slice
+#   - Rollback kubelet fiable même en cas d'échec de restart
 #
 # Améliorations v2.0.6:
 #   - Attachement automatique du service kubelet à kubelet.slice (CRITIQUE)
