@@ -935,6 +935,55 @@ kubelet_pleg_relist_duration_seconds{quantile="0.99"}
 
 ## 🐛 Troubleshooting
 
+### Problème 0 : Le script affiche `!/bin/bash` au lieu du message d'aide
+
+**Symptômes** :
+```bash
+./kubelet_auto_config.sh --help
+# !/bin/bash
+# ################################################################################
+# Script de configuration automatique...
+# (Le shebang #! est affiché sans le #)
+```
+
+**Cause** : BOM UTF-8 (Byte Order Mark) invisible au début du fichier
+
+**Détection** :
+```bash
+# Vérifier les 3 premiers octets
+hexdump -C kubelet_auto_config.sh | head -1
+# Si vous voyez "ef bb bf" → BOM détecté
+
+# Ou avec file
+file kubelet_auto_config.sh
+# Si vous voyez "UTF-8 Unicode (with BOM)" → BOM détecté
+```
+
+**Solution automatique** :
+```bash
+# Utiliser le script de diagnostic fourni
+bash debug_bom.sh
+
+# Ou manuellement :
+# 1. Backup
+cp kubelet_auto_config.sh kubelet_auto_config.sh.backup
+
+# 2. Supprimer les 3 premiers octets (BOM)
+tail -c +4 kubelet_auto_config.sh > kubelet_auto_config.sh.tmp
+mv kubelet_auto_config.sh.tmp kubelet_auto_config.sh
+chmod +x kubelet_auto_config.sh
+
+# 3. Vérifier
+./kubelet_auto_config.sh --help  # Doit afficher l'aide correctement
+```
+
+**Prévention** :
+- Le hook pre-commit Git détecte automatiquement les BOM
+- Éviter d'éditer le script avec des éditeurs Windows (Notepad)
+- Utiliser `vim`, `nano`, ou VSCode avec encoding UTF-8 sans BOM
+
+---
+
 ### Problème 1 : Kubelet ne démarre pas après application
 
 **Symptômes** :
