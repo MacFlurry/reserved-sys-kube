@@ -1264,6 +1264,99 @@ Ouvrez une issue sur GitHub avec :
 
 ## 📝 Changelog et Notes de Version
 
+### v2.0.4 (2025-10-21)
+
+**🔒 Correctifs de Sécurité et Robustesse**
+
+Cette version corrige 4 problèmes critiques et majeurs identifiés lors d'une analyse exhaustive du code :
+
+#### 1. Protection contre les Race Conditions (CRITIQUE)
+
+**Problème** : Si plusieurs instances du script s'exécutaient simultanément, la rotation des backups (lignes 835-846) pouvait causer des corruptions de fichiers ou suppressions inattendues.
+
+**Solution** : Implémentation d'un système de lock file avec timeout :
+
+```bash
+# Le script acquiert un lock au démarrage
+acquire_lock() {
+    local lock_file="/var/lock/kubelet-auto-config.lock"
+    local timeout=30
+
+    while ! mkdir "$lock_file" 2>/dev/null; do
+        if (( elapsed >= timeout )); then
+            log_error "Un autre processus exécute déjà ce script"
+        fi
+        sleep 2
+    done
+
+    trap 'rm -rf "$lock_file"' EXIT
+}
+```
+
+**Impact** : Impossible d'exécuter le script simultanément, protection totale des backups.
+
+#### 2. Validation Robuste de RAM_GIB_INT (MAJEUR)
+
+**Problème** : Si `bc` retournait `.50` au lieu de `0.50`, la variable `RAM_GIB_INT` devenait vide (ligne 723), causant des erreurs dans les calculs de réservations.
+
+**Solution** : Validation avec fallback vers 1 GiB :
+
+```bash
+RAM_GIB_INT=$(echo "$RAM_GIB" | cut -d. -f1)
+
+if [[ -z "$RAM_GIB_INT" ]] || [[ "$RAM_GIB_INT" == "0" ]]; then
+    RAM_GIB_INT=1
+    log_warning "RAM GiB invalide, utilisation valeur minimale: 1 GiB"
+fi
+```
+
+**Impact** : Le script ne crashe plus sur systèmes à faible RAM ou configurations exotiques.
+
+#### 3. Détection des Allocatables Négatifs (MAJEUR)
+
+**Problème** : Avec un `density-factor` trop élevé (ex: 4.0 sur petit nœud), les réservations pouvaient dépasser la capacité totale, créant un allocatable négatif. Kubernetes refuserait alors de démarrer.
+
+**Solution** : Validation pré-flight avec messages d'erreur explicites :
+
+```bash
+local total_cpu_reserved=$((SYS_CPU + KUBE_CPU))
+local total_cpu_capacity=$((VCPU * 1000))
+
+if (( total_cpu_reserved >= total_cpu_capacity )); then
+    log_error "Réservations CPU ($total_cpu_reserved m) >= Capacité ($total_cpu_capacity m)! Réduisez le density-factor."
+fi
+
+# Avertissement si allocatable < 10%
+if (( cpu_alloc_percent < 10 )); then
+    log_warning "Allocatable CPU très faible: ${cpu_alloc_percent}%"
+fi
+```
+
+**Impact** : Le script refuse de générer une configuration invalide, protégeant kubelet.
+
+#### 4. Portabilité BSD/macOS pour mktemp (MOYEN)
+
+**Problème** : La syntaxe `mktemp /tmp/kubelet-config.XXXXXX.yaml` ne fonctionne pas sur BSD/macOS (ligne 775), où mktemp ne supporte pas le suffixe dans le template.
+
+**Solution** : Création en 2 étapes portable :
+
+```bash
+# Portable sur Linux et BSD
+temp_config=$(mktemp /tmp/kubelet-config.XXXXXX)
+mv "$temp_config" "${temp_config}.yaml"
+temp_config="${temp_config}.yaml"
+```
+
+**Impact** : Le script fonctionne maintenant sur macOS (tests en environnement de dev).
+
+**Résumé des changements** :
+- ✅ Lock file avec timeout 30s (anti-concurrence)
+- ✅ Validation RAM_GIB_INT avec fallback 1 GiB
+- ✅ Blocage des allocatables négatifs + warnings <10%
+- ✅ mktemp portable Linux/BSD/macOS
+
+---
+
 ### v2.0.3 (2025-10-21)
 
 **🔄 Rotation des Backups Multi-Niveaux**

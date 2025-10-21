@@ -1,8 +1,14 @@
 #!/bin/bash
 ################################################################################
 # Script de configuration automatique des réservations kubelet
-# Version: 2.0.3
+# Version: 2.0.4
 # Compatible Kubernetes v1.32+, cgroups v1/v2, systemd
+#
+# Améliorations v2.0.4:
+#   - Protection contre les race conditions (lock file)
+#   - Validation robuste de RAM_GIB_INT avec fallback
+#   - Détection et blocage des allocatables négatifs
+#   - Portabilité BSD/macOS pour mktemp
 #
 # Améliorations v2.0.3:
 #   - Rotation des backups (4 derniers changements réussis)
@@ -45,7 +51,7 @@
 set -euo pipefail
 
 # Version
-VERSION="2.0.3"
+VERSION="2.0.4"
 
 # Couleurs pour l'output
 RED='\033[0;31m'
@@ -92,6 +98,26 @@ check_root() {
     if [[ $EUID -ne 0 ]]; then
         log_error "Ce script doit être exécuté en tant que root (sudo)"
     fi
+}
+
+acquire_lock() {
+    local lock_file="/var/lock/kubelet-auto-config.lock"
+    local timeout=30
+    local elapsed=0
+
+    while ! mkdir "$lock_file" 2>/dev/null; do
+        if (( elapsed >= timeout )); then
+            log_error "Un autre processus exécute déjà ce script (timeout après ${timeout}s)"
+        fi
+        log_warning "Script déjà en cours d'exécution... Attente ($elapsed/$timeout s)"
+        sleep 2
+        ((elapsed += 2))
+    done
+
+    echo $$ > "$lock_file/pid"
+    trap 'rm -rf "$lock_file"' EXIT
+
+    log_info "Lock acquis (PID $$)"
 }
 
 check_dependencies() {
@@ -695,6 +721,7 @@ main() {
 
     # Vérifications système
     check_root
+    acquire_lock
     check_dependencies
 
     # Validation des entrées
@@ -722,6 +749,12 @@ main() {
     # Note: RAM_GIB peut être une décimale maintenant, on doit l'arrondir pour les calculs
     RAM_GIB_INT=$(echo "$RAM_GIB" | cut -d. -f1)
 
+    # Validation de RAM_GIB_INT avec fallback
+    if [[ -z "$RAM_GIB_INT" ]] || [[ "$RAM_GIB_INT" == "0" ]]; then
+        RAM_GIB_INT=1
+        log_warning "RAM GiB invalide ou vide (valeur: '$RAM_GIB'), utilisation valeur minimale: 1 GiB"
+    fi
+
     case $PROFILE in
         gke)
             read -r SYS_CPU SYS_MEM KUBE_CPU KUBE_MEM <<< $(calculate_gke "$VCPU" "$RAM_GIB_INT" "$RAM_MIB")
@@ -741,6 +774,32 @@ main() {
     if [[ $(echo "$DENSITY_FACTOR != 1.0" | bc -l) -eq 1 ]]; then
         log_info "Application du density-factor ${DENSITY_FACTOR}..."
         read -r SYS_CPU SYS_MEM KUBE_CPU KUBE_MEM <<< $(apply_density_factor "$SYS_CPU" "$SYS_MEM" "$KUBE_CPU" "$KUBE_MEM" "$DENSITY_FACTOR")
+    fi
+
+    # Validation: s'assurer que l'allocatable n'est pas négatif
+    local total_cpu_reserved=$((SYS_CPU + KUBE_CPU))
+    local total_mem_reserved=$((SYS_MEM + KUBE_MEM))
+    local total_cpu_capacity=$((VCPU * 1000))
+    local total_mem_capacity=$(echo "scale=0; $RAM_GIB * 1024" | bc | cut -d. -f1)
+
+    if (( total_cpu_reserved >= total_cpu_capacity )); then
+        log_error "Réservations CPU totales ($total_cpu_reserved m) >= Capacité CPU ($total_cpu_capacity m)! Réduisez le density-factor."
+    fi
+
+    if (( total_mem_reserved >= total_mem_capacity )); then
+        log_error "Réservations mémoire totales ($total_mem_reserved Mi) >= Capacité mémoire ($total_mem_capacity Mi)! Réduisez le density-factor."
+    fi
+
+    # Avertissement si l'allocatable est trop faible (<10%)
+    local cpu_alloc_percent=$(echo "scale=2; (($total_cpu_capacity - $total_cpu_reserved) / $total_cpu_capacity) * 100" | bc)
+    local mem_alloc_percent=$(echo "scale=2; (($total_mem_capacity - $total_mem_reserved) / $total_mem_capacity) * 100" | bc)
+
+    if (( $(echo "$cpu_alloc_percent < 10" | bc -l) )); then
+        log_warning "Allocatable CPU très faible: ${cpu_alloc_percent}% (< 10% de la capacité)"
+    fi
+
+    if (( $(echo "$mem_alloc_percent < 10" | bc -l) )); then
+        log_warning "Allocatable mémoire très faible: ${mem_alloc_percent}% (< 10% de la capacité)"
     fi
 
     # Affichage du résumé
@@ -772,7 +831,9 @@ main() {
 
     # Génération de la nouvelle configuration dans un fichier temporaire
     local temp_config
-    temp_config=$(mktemp /tmp/kubelet-config.XXXXXX.yaml)
+    temp_config=$(mktemp /tmp/kubelet-config.XXXXXX)
+    mv "$temp_config" "${temp_config}.yaml"
+    temp_config="${temp_config}.yaml"
 
     log_info "Génération de la nouvelle configuration kubelet..."
     generate_kubelet_config "$SYS_CPU" "$SYS_MEM" "$KUBE_CPU" "$KUBE_MEM" "$VCPU" "$RAM_GIB" "$RAM_MIB" > "$temp_config"
