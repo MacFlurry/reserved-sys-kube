@@ -35,17 +35,17 @@ assert_equals() {
     local expected=$2
     local actual=$3
 
-    ((TESTS_TOTAL++))
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
 
     if [[ "$expected" == "$actual" ]]; then
         echo -e "${GREEN}✓${NC} $test_name"
-        ((TESTS_PASSED++))
+        TESTS_PASSED=$((TESTS_PASSED + 1))
         return 0
     else
         echo -e "${RED}✗${NC} $test_name"
         echo "  Expected: $expected"
         echo "  Actual:   $actual"
-        ((TESTS_FAILED++))
+        TESTS_FAILED=$((TESTS_FAILED + 1))
         return 1
     fi
 }
@@ -56,7 +56,7 @@ assert_in_range() {
     local min=$3
     local max=$4
 
-    ((TESTS_TOTAL++))
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
 
     # Normaliser les valeurs en entiers pour éviter les problèmes avec (( ))
     local value_int=$(printf "%.0f" "$value" 2>/dev/null || echo "$value")
@@ -65,13 +65,13 @@ assert_in_range() {
 
     if (( value_int >= min_int && value_int <= max_int )); then
         echo -e "${GREEN}✓${NC} $test_name (value=$value_int, range=[$min_int-$max_int])"
-        ((TESTS_PASSED++))
+        TESTS_PASSED=$((TESTS_PASSED + 1))
         return 0
     else
         echo -e "${RED}✗${NC} $test_name"
         echo "  Value: $value_int"
         echo "  Expected range: [$min_int-$max_int]"
-        ((TESTS_FAILED++))
+        TESTS_FAILED=$((TESTS_FAILED + 1))
         return 1
     fi
 }
@@ -215,8 +215,8 @@ test_decimal_handling() {
     local result
     result=$(calculate_gke "$vcpu" "$ram_gib" "$ram_mib" 2>&1) || {
         echo -e "${RED}✗${NC} calculate_gke plante avec ram_gib décimal"
-        ((TESTS_FAILED++))
-        ((TESTS_TOTAL++))
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        TESTS_TOTAL=$((TESTS_TOTAL + 1))
         return 1
     }
 
@@ -226,13 +226,13 @@ test_decimal_handling() {
     if [[ "$sys_cpu" =~ ^[0-9]+$ ]] && [[ "$sys_mem" =~ ^[0-9]+$ ]] && \
        [[ "$kube_cpu" =~ ^[0-9]+$ ]] && [[ "$kube_mem" =~ ^[0-9]+$ ]]; then
         echo -e "${GREEN}✓${NC} Gestion décimales: toutes les valeurs sont des entiers valides"
-        ((TESTS_PASSED++))
-        ((TESTS_TOTAL++))
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+        TESTS_TOTAL=$((TESTS_TOTAL + 1))
     else
         echo -e "${RED}✗${NC} Gestion décimales: certaines valeurs ne sont pas des entiers"
         echo "  sys_cpu=$sys_cpu, sys_mem=$sys_mem, kube_cpu=$kube_cpu, kube_mem=$kube_mem"
-        ((TESTS_FAILED++))
-        ((TESTS_TOTAL++))
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        TESTS_TOTAL=$((TESTS_TOTAL + 1))
     fi
 }
 
