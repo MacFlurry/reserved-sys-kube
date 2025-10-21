@@ -1264,6 +1264,56 @@ Ouvrez une issue sur GitHub avec :
 
 ## 📝 Changelog et Notes de Version
 
+### v2.0.2 (2025-10-21)
+
+**🎯 Amélioration de la Gestion des Backups**
+
+**Problème Résolu** :
+Dans v2.0.0-2.0.1, le message "Suppression du backup temporaire (utilisez --backup pour le conserver)" apparaissait **après** la suppression effective du fichier, ne laissant aucune possibilité à l'utilisateur de réagir.
+
+**Nouvelle Approche** :
+- ✅ **Conservation automatique du dernier backup réussi** : `/var/lib/kubelet/config.yaml.last-success`
+- ✅ **Rollback manuel toujours possible** sans avoir à spécifier `--backup`
+- ✅ **Auto-nettoyage intelligent** : Suppression automatique des backups timestampés > 30 jours
+- ✅ **Comportement clair** :
+  - **Sans `--backup`** : Le backup est renommé en `.last-success` (écrase le précédent)
+  - **Avec `--backup`** : Le backup timestampé est conservé de façon permanente
+
+**Exemple d'utilisation** :
+
+```bash
+# Exécution normale (sans --backup)
+sudo ./kubelet_auto_config.sh --profile conservative
+
+# Sortie :
+# [SUCCESS] ✓ Kubelet actif et opérationnel
+# [INFO] Backup de sécurité conservé : /var/lib/kubelet/config.yaml.last-success
+# [INFO]   → Permet un rollback manuel si nécessaire
+# [INFO]   → Utilisez --backup pour conserver des backups timestampés multiples
+
+# Rollback manuel si problème détecté plus tard :
+sudo cp /var/lib/kubelet/config.yaml.last-success /var/lib/kubelet/config.yaml
+sudo systemctl restart kubelet
+```
+
+**Avantages** :
+- 🔒 **Sécurité maximale** : Toujours un backup disponible pour rollback
+- 👤 **Meilleure UX** : Pas de décision sous pression
+- 🤖 **Compatible automation** : Pas de prompt interactif
+- 🧹 **Pas de pollution** : Nettoyage automatique des anciens backups
+- ✅ **Best practice Linux** : Similaire à `.rpmsave`, `.dpkg-old`
+
+---
+
+### v2.0.1 (2025-10-21)
+
+**📚 Documentation**
+- Fusion des notes de version RELEASE_NOTES_v2.0.0.md dans README.md
+- Traduction complète en français
+- Suppression du fichier RELEASE_NOTES séparé
+
+---
+
 ### v2.0.0-production (2025-10-21)
 
 **🎉 Vue d'ensemble**
