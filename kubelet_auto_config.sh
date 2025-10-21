@@ -1,8 +1,13 @@
 #!/bin/bash
 ################################################################################
 # Script de configuration automatique des réservations kubelet
-# Version: 2.0.2
+# Version: 2.0.3
 # Compatible Kubernetes v1.32+, cgroups v1/v2, systemd
+#
+# Améliorations v2.0.3:
+#   - Rotation des backups (4 derniers changements réussis)
+#   - Historique de rollback multi-niveaux (.last-success.{0,1,2,3})
+#   - Conservation permanente des backups --backup (90 jours)
 #
 # Améliorations v2.0.2:
 #   - Conservation intelligente des backups (.last-success)
@@ -40,7 +45,7 @@
 set -euo pipefail
 
 # Version
-VERSION="2.0.2"
+VERSION="2.0.3"
 
 # Couleurs pour l'output
 RED='\033[0;31m'
@@ -813,24 +818,60 @@ main() {
     if systemctl is-active --quiet kubelet; then
         log_success "✓ Kubelet actif et opérationnel"
 
-        # Gestion intelligente du backup
-        if [[ "$BACKUP" != true ]] && [[ -n "$BACKUP_FILE" ]] && [[ -f "$BACKUP_FILE" ]]; then
-            # Conserver comme .last-success au lieu de supprimer
-            LAST_SUCCESS_BACKUP="/var/lib/kubelet/config.yaml.last-success"
-            mv "$BACKUP_FILE" "$LAST_SUCCESS_BACKUP"
+        # Gestion intelligente du backup avec rotation
+        if [[ -n "$BACKUP_FILE" ]] && [[ -f "$BACKUP_FILE" ]]; then
+            local max_rotation=4
 
-            log_info "Backup de sécurité conservé : $LAST_SUCCESS_BACKUP"
-            log_info "  → Permet un rollback manuel si nécessaire"
-            log_info "  → Utilisez --backup pour conserver des backups timestampés multiples"
-
-            # Nettoyage automatique des anciens backups timestampés (>30 jours)
-            local old_count=$(find /var/lib/kubelet -name 'config.yaml.backup.2*' -mtime +30 2>/dev/null | wc -l)
-            if (( old_count > 0 )); then
-                find /var/lib/kubelet -name 'config.yaml.backup.2*' -mtime +30 -delete 2>/dev/null
-                log_info "Nettoyé $old_count ancien(s) backup(s) timestampé(s) > 30 jours"
+            if [[ "$BACKUP" == true ]]; then
+                # --backup spécifié : conserver le backup timestampé permanent
+                log_success "Backup permanent conservé : $BACKUP_FILE"
+                log_info "  → Backup manuel permanent (conservé jusqu'à 90 jours)"
             fi
-        elif [[ "$BACKUP" == true ]] && [[ -n "$BACKUP_FILE" ]]; then
-            log_success "Backup timestampé conservé : $BACKUP_FILE"
+
+            # Rotation des backups automatiques (toujours effectuée)
+            log_info "Rotation des backups automatiques..."
+
+            # Rotation : .3 → supprimé, .2 → .3, .1 → .2, .0 → .1
+            for i in $(seq $((max_rotation - 1)) -1 0); do
+                local current="/var/lib/kubelet/config.yaml.last-success.$i"
+                local next="/var/lib/kubelet/config.yaml.last-success.$((i + 1))"
+
+                if [[ -f "$current" ]]; then
+                    if (( i == max_rotation - 1 )); then
+                        rm -f "$current"  # Supprime le plus ancien
+                    else
+                        mv "$current" "$next"
+                    fi
+                fi
+            done
+
+            # Le nouveau backup devient .0
+            if [[ "$BACKUP" == true ]]; then
+                # Copier (car on garde aussi l'original timestampé)
+                cp "$BACKUP_FILE" "/var/lib/kubelet/config.yaml.last-success.0"
+            else
+                # Déplacer (pas de backup permanent demandé)
+                mv "$BACKUP_FILE" "/var/lib/kubelet/config.yaml.last-success.0"
+            fi
+
+            log_info "Backup rotatif créé : /var/lib/kubelet/config.yaml.last-success.0"
+
+            # Compter les backups disponibles dans l'historique
+            local history_count=0
+            for i in $(seq 0 $((max_rotation - 1))); do
+                if [[ -f "/var/lib/kubelet/config.yaml.last-success.$i" ]]; then
+                    ((history_count++))
+                fi
+            done
+            log_info "  → $history_count backup(s) rotatif(s) disponibles : .last-success.{0..$((history_count - 1))}"
+            log_info "  → .0 = plus récent, .$((history_count - 1)) = plus ancien"
+
+            # Nettoyage des vieux backups permanents timestampés (>90 jours)
+            local old_count=$(find /var/lib/kubelet -name 'config.yaml.backup.2*' -mtime +90 2>/dev/null | wc -l)
+            if (( old_count > 0 )); then
+                find /var/lib/kubelet -name 'config.yaml.backup.2*' -mtime +90 -delete 2>/dev/null
+                log_info "Nettoyé $old_count backup(s) permanent(s) > 90 jours"
+            fi
         fi
     else
         log_error "✗ Kubelet non actif après redémarrage!"
