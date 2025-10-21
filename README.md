@@ -56,7 +56,7 @@ Ce script applique les **formules officielles** documentées par Google (GKE), A
 ## 🔧 Prérequis
 
 ### Système d'exploitation
-- Linux avec systemd (Ubuntu 20.04+, Debian 11+, RHEL 8+, Rocky Linux 8+)
+- Ubuntu 20.04+ avec systemd
 - Noyau Linux 5.x+ (pour cgroups v2, recommandé)
 
 ### Kubernetes
@@ -69,16 +69,8 @@ Ce script applique les **formules officielles** documentées par Google (GKE), A
 Le script nécessite les outils suivants :
 
 ```bash
-# Sur Debian/Ubuntu
 sudo apt update
 sudo apt install -y bc jq systemd yq
-
-# Sur RHEL/Rocky/CentOS
-sudo dnf install -y bc jq systemd yq
-
-# Installer yq (si non disponible dans les repos)
-sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
-sudo chmod +x /usr/bin/yq
 ```
 
 ### Permissions
@@ -1071,11 +1063,7 @@ sudo vi /var/lib/kubelet/config.yaml
 **Solution** :
 ```bash
 # Installer les dépendances manquantes
-# Ubuntu/Debian
 sudo apt update && sudo apt install -y bc jq systemd
-
-# RHEL/Rocky/CentOS
-sudo dnf install -y bc jq systemd
 
 # Vérifier
 which bc jq systemctl
@@ -2113,12 +2101,8 @@ systemctl status kubelet
 
 **Nouvelle Dépendance : yq**
 ```bash
-# Ubuntu/Debian
+# Ubuntu
 sudo apt install yq
-
-# Ou installation manuelle
-sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
-sudo chmod +x /usr/bin/yq
 ```
 
 **Toutes les Dépendances :**
@@ -2177,7 +2161,7 @@ v2.0.0 répond à toutes les exigences critiques de production :
 - ✅ Seuils dynamiques (optimisés pour la taille du nœud)
 - ✅ Rétrocompatible (mise à niveau facile)
 - ✅ Bien documenté (README, commentaires, notes de version)
-- ✅ Testé sur plusieurs distros (Ubuntu, Debian, Rocky)
+- ✅ Testé sur Ubuntu 20.04, 22.04, 24.04
 
 **Recommandation de Mise à Niveau :** ✅ **Recommandé pour tous les utilisateurs**
 
@@ -2257,10 +2241,6 @@ SOFTWARE.
 
 **Note** : Ce script a été testé sur les distributions suivantes :
 - ✅ Ubuntu 20.04, 22.04, 24.04
-- ✅ Debian 11, 12
-- ✅ RHEL 8, 9
-- ✅ Rocky Linux 8, 9
-- ✅ Amazon Linux 2023
 
 **Versions Kubernetes testées** :
 - ✅ v1.26.x

@@ -111,6 +111,18 @@ check_root() {
     fi
 }
 
+check_os() {
+    if [[ -r /etc/os-release ]]; then
+        # shellcheck disable=SC1091
+        source /etc/os-release
+        if [[ "${ID}" != "ubuntu" ]]; then
+            log_error "Système non supporté détecté (${PRETTY_NAME:-$ID}). Ce script est compatible uniquement avec Ubuntu."
+        fi
+    else
+        log_error "Impossible de détecter la distribution (fichier /etc/os-release introuvable). Ce script supporte uniquement Ubuntu."
+    fi
+}
+
 acquire_lock() {
     local lock_file="/var/lock/kubelet-auto-config.lock"
     local timeout=30
@@ -463,8 +475,7 @@ CPUAccounting=yes
 MemoryAccounting=yes
 EOF
                 systemctl daemon-reload
-                systemctl start kubelet.slice
-                log_success "kubelet.slice créé et démarré"
+                log_success "kubelet.slice créé (systemd montera la slice à la demande)"
             fi
         else
             log_success "Cgroup /kubelet.slice existe"
@@ -514,13 +525,14 @@ ensure_kubelet_slice_attachment() {
 # Attache le service kubelet à kubelet.slice pour l'enforcement de kube-reserved
 # Généré automatiquement par kubelet_auto_config.sh
 
-[Service]
-# Placer kubelet dans kubelet.slice au lieu de system.slice
-Slice=kubelet.slice
-
+[Unit]
 # S'assurer que la slice existe avant de démarrer kubelet
 After=kubelet.slice
 Requires=kubelet.slice
+
+[Service]
+# Placer kubelet dans kubelet.slice au lieu de system.slice
+Slice=kubelet.slice
 EOF
 
     log_success "Drop-in systemd créé : $dropin_file"
@@ -558,10 +570,7 @@ validate_kubelet_slice_attachment() {
     if [[ "$effective_slice" == "kubelet.slice" ]]; then
         log_success "✓ Service kubelet correctement attaché à kubelet.slice"
     else
-        log_error "✗ Service kubelet PAS dans kubelet.slice (détecté: ${effective_slice:-N/A})"
-        log_error "  → kube-reserved ne sera PAS appliqué au kubelet lui-même!"
-        log_error "  → Vérifiez : systemctl status kubelet | grep Cgroup"
-        return 1
+        log_error $'✗ Service kubelet PAS dans kubelet.slice (détecté: '"${effective_slice:-N/A}"$')\n  → kube-reserved ne sera PAS appliqué au kubelet lui-même!\n  → Vérifiez : systemctl status kubelet | grep Cgroup'
     fi
 
     # Vérifier via le cgroup réel du processus kubelet
@@ -919,6 +928,7 @@ main() {
 
     # Vérifications système
     check_root
+    check_os
     acquire_lock
     check_dependencies
 
@@ -1064,7 +1074,7 @@ main() {
     # Redémarrage du kubelet avec rollback en cas d'échec
     log_info "Redémarrage du kubelet..."
     if ! systemctl restart kubelet; then
-        log_error "Échec du redémarrage du kubelet!"
+        log_warning "Échec du redémarrage du kubelet"
 
         # Tentative de rollback
         if [[ -n "$BACKUP_FILE" ]] && [[ -f "$BACKUP_FILE" ]]; then
@@ -1073,15 +1083,14 @@ main() {
 
             if systemctl restart kubelet; then
                 log_warning "Configuration restaurée, kubelet redémarré avec l'ancienne config"
-                log_error "La nouvelle configuration a causé un problème. Vérifiez les logs: journalctl -u kubelet -n 100"
             else
-                log_error "Échec de la restauration! Vérifiez manuellement: journalctl -u kubelet -f"
+                log_warning "Échec de la restauration automatique. Vérifiez manuellement: journalctl -u kubelet -f"
             fi
         else
-            log_error "Pas de backup disponible pour restauration. Vérifiez les logs: journalctl -u kubelet -f"
+            log_warning "Pas de backup disponible pour restauration automatique"
         fi
 
-        exit 1
+        log_error "La nouvelle configuration a causé un problème. Vérifiez les logs: journalctl -u kubelet -n 100"
     fi
 
     log_success "Kubelet redémarré avec succès"
@@ -1152,17 +1161,20 @@ main() {
             fi
         fi
     else
-        log_error "✗ Kubelet non actif après redémarrage!"
+        log_warning "✗ Kubelet non actif après redémarrage!"
 
         # Rollback automatique
         if [[ -n "$BACKUP_FILE" ]] && [[ -f "$BACKUP_FILE" ]]; then
             log_warning "Rollback automatique en cours..."
             cp "$BACKUP_FILE" "$KUBELET_CONFIG"
-            systemctl restart kubelet
-            log_error "Configuration restaurée. Analysez les logs: journalctl -u kubelet -n 100"
+            if systemctl restart kubelet; then
+                log_warning "Configuration restaurée. Kubelet redémarré avec l'ancienne configuration"
+            else
+                log_warning "La restauration n'a pas réussi. Analysez les logs: journalctl -u kubelet -n 100"
+            fi
         fi
 
-        exit 1
+        log_error "Abandon: kubelet non actif après redémarrage. Consultez journalctl -u kubelet -n 100"
     fi
 
     echo ""
