@@ -77,11 +77,6 @@ assert_in_range() {
 }
 
 test_gke_small_node() {
-    echo ""
-    echo "═══════════════════════════════════════════════════════"
-    echo "Test: GKE - Petit nœud (2 vCPU, 4 GiB)"
-    echo "═══════════════════════════════════════════════════════"
-
     local vcpu=2
     local ram_gib=4
     local ram_mib=3891
@@ -110,11 +105,6 @@ test_gke_small_node() {
 }
 
 test_gke_medium_node() {
-    echo ""
-    echo "═══════════════════════════════════════════════════════"
-    echo "Test: GKE - Nœud moyen (8 vCPU, 32 GiB)"
-    echo "═══════════════════════════════════════════════════════"
-
     local vcpu=8
     local ram_gib=32
     local ram_mib=31232
@@ -135,11 +125,6 @@ test_gke_medium_node() {
 }
 
 test_gke_large_node() {
-    echo ""
-    echo "═══════════════════════════════════════════════════════"
-    echo "Test: GKE - Gros nœud (48 vCPU, 192 GiB)"
-    echo "═══════════════════════════════════════════════════════"
-
     local vcpu=48
     local ram_gib=192
     local ram_mib=187392
@@ -162,11 +147,6 @@ test_gke_large_node() {
 }
 
 test_eks_calculations() {
-    echo ""
-    echo "═══════════════════════════════════════════════════════"
-    echo "Test: EKS - Nœud moyen (8 vCPU, 32 GiB)"
-    echo "═══════════════════════════════════════════════════════"
-
     local vcpu=8
     local ram_gib=32
     local ram_mib=31232
@@ -187,11 +167,6 @@ test_eks_calculations() {
 }
 
 test_conservative_calculations() {
-    echo ""
-    echo "═══════════════════════════════════════════════════════"
-    echo "Test: Conservative - Nœud moyen (8 vCPU, 32 GiB)"
-    echo "═══════════════════════════════════════════════════════"
-
     local vcpu=8
     local ram_gib=32
     local ram_mib=31232
@@ -212,11 +187,6 @@ test_conservative_calculations() {
 }
 
 test_minimal_calculations() {
-    echo ""
-    echo "═══════════════════════════════════════════════════════"
-    echo "Test: Minimal - Nœud moyen (8 vCPU, 32 GiB)"
-    echo "═══════════════════════════════════════════════════════"
-
     local vcpu=8
     local ram_gib=32
     local ram_mib=31232
@@ -237,11 +207,6 @@ test_minimal_calculations() {
 }
 
 test_decimal_handling() {
-    echo ""
-    echo "═══════════════════════════════════════════════════════"
-    echo "Test: Gestion des décimales (3.80 GiB)"
-    echo "═══════════════════════════════════════════════════════"
-
     local vcpu=2
     local ram_gib=3.80
     local ram_mib=3891
@@ -271,27 +236,63 @@ test_decimal_handling() {
     fi
 }
 
+run_test_suite() {
+    local suite_name=$1
+    local test_function=$2
+
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "📦 $suite_name"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    local tests_before=$TESTS_TOTAL
+    local failed_before=$TESTS_FAILED
+
+    $test_function
+
+    local tests_run=$((TESTS_TOTAL - tests_before))
+    local tests_suite_failed=$((TESTS_FAILED - failed_before))
+    local tests_suite_passed=$((tests_run - tests_suite_failed))
+
+    if (( tests_suite_failed == 0 )); then
+        echo -e "${GREEN}✓${NC} Suite complète : $tests_suite_passed/$tests_run tests réussis"
+    else
+        echo -e "${RED}✗${NC} Suite échouée : $tests_suite_passed/$tests_run tests réussis, $tests_suite_failed échoués"
+    fi
+}
+
 main() {
     echo "╔═══════════════════════════════════════════════════════════════╗"
-    echo "║  Tests unitaires - kubelet_auto_config.sh                    ║"
+    echo "║       Tests unitaires - kubelet_auto_config.sh               ║"
     echo "╚═══════════════════════════════════════════════════════════════╝"
+    echo ""
+    echo "Suites de tests à exécuter :"
+    echo "  [1] GKE - Petit nœud (2 vCPU, 4 GiB)"
+    echo "  [2] GKE - Nœud moyen (8 vCPU, 32 GiB)"
+    echo "  [3] GKE - Gros nœud (48 vCPU, 192 GiB)"
+    echo "  [4] EKS - Nœud moyen (8 vCPU, 32 GiB)"
+    echo "  [5] Conservative - Nœud moyen (8 vCPU, 32 GiB)"
+    echo "  [6] Minimal - Nœud moyen (8 vCPU, 32 GiB)"
+    echo "  [7] Gestion des décimales (3.80 GiB - ARM64)"
+    echo ""
+    echo "═══════════════════════════════════════════════════════════════"
 
     # Charger les fonctions
     source_functions
 
     # Exécuter les tests
-    test_gke_small_node
-    test_gke_medium_node
-    test_gke_large_node
-    test_eks_calculations
-    test_conservative_calculations
-    test_minimal_calculations
-    test_decimal_handling
+    run_test_suite "GKE - Petit nœud (2 vCPU, 4 GiB)" test_gke_small_node
+    run_test_suite "GKE - Nœud moyen (8 vCPU, 32 GiB)" test_gke_medium_node
+    run_test_suite "GKE - Gros nœud (48 vCPU, 192 GiB)" test_gke_large_node
+    run_test_suite "EKS - Nœud moyen (8 vCPU, 32 GiB)" test_eks_calculations
+    run_test_suite "Conservative - Nœud moyen (8 vCPU, 32 GiB)" test_conservative_calculations
+    run_test_suite "Minimal - Nœud moyen (8 vCPU, 32 GiB)" test_minimal_calculations
+    run_test_suite "Gestion des décimales (3.80 GiB - ARM64)" test_decimal_handling
 
     # Résumé
     echo ""
     echo "═══════════════════════════════════════════════════════════════"
-    echo "RÉSUMÉ DES TESTS"
+    echo "               RÉSUMÉ GLOBAL DES TESTS"
     echo "═══════════════════════════════════════════════════════════════"
     echo "Total:    $TESTS_TOTAL tests"
     echo -e "${GREEN}Réussis:  $TESTS_PASSED${NC}"
@@ -299,6 +300,7 @@ main() {
     echo "═══════════════════════════════════════════════════════════════"
 
     if (( TESTS_FAILED > 0 )); then
+        echo -e "\n${RED}✗ Certains tests ont échoué${NC}\n"
         exit 1
     else
         echo -e "\n${GREEN}✓ Tous les tests sont passés !${NC}\n"
