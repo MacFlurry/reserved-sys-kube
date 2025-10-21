@@ -13,6 +13,7 @@
 #   --profile <gke|eks|conservative|minimal>  Profil de calcul (défaut: gke)
 #   --density-factor <float>                   Facteur multiplicateur 0.1-5.0 (défaut: 1.0, recommandé: 0.5-3.0)
 #   --target-pods <int>                        Nombre de pods cible (calcul auto du facteur)
+#   --node-type <control-plane|worker|auto>    Type de nœud (défaut: auto - détection automatique)
 #   --dry-run                                  Affiche la config sans appliquer
 #   --backup                                   Conserve le backup (par défaut supprimé si succès)
 #   --help                                     Affiche l'aide
@@ -21,6 +22,7 @@
 #   ./kubelet_auto_config.sh
 #   ./kubelet_auto_config.sh --profile conservative --density-factor 1.5
 #   ./kubelet_auto_config.sh --target-pods 110 --profile conservative
+#   ./kubelet_auto_config.sh --node-type control-plane  # Forcer le mode control-plane
 #   ./kubelet_auto_config.sh --dry-run
 #
 # Dépendances: bc, jq, systemctl, yq
@@ -29,7 +31,7 @@
 set -euo pipefail
 
 # Version
-VERSION="2.0.9"
+VERSION="2.0.11"
 
 # Couleurs pour l'output
 RED='\033[0;31m'
@@ -42,6 +44,8 @@ NC='\033[0m' # No Color
 PROFILE="gke"
 DENSITY_FACTOR=1.0
 TARGET_PODS=""
+NODE_TYPE="auto"
+NODE_TYPE_DETECTED=""
 DRY_RUN=false
 BACKUP=false
 KUBELET_CONFIG="/var/lib/kubelet/config.yaml"
@@ -208,6 +212,52 @@ validate_profile() {
             log_error "Profil invalide: $profile. Valeurs acceptées: gke, eks, conservative, minimal"
             ;;
     esac
+}
+
+validate_node_type() {
+    local node_type=$1
+    case $node_type in
+        control-plane|worker|auto)
+            return 0
+            ;;
+        *)
+            log_error "Type de nœud invalide: $node_type. Valeurs acceptées: control-plane, worker, auto"
+            ;;
+    esac
+}
+
+################################################################################
+# Détection du type de nœud (control-plane vs worker)
+################################################################################
+
+detect_node_type() {
+    log_info "Détection du type de nœud..."
+
+    # Vérifier la présence de static pods control-plane dans /etc/kubernetes/manifests
+    local manifests_dir="/etc/kubernetes/manifests"
+    local is_control_plane=false
+
+    if [[ -d "$manifests_dir" ]]; then
+        # Vérifier la présence des manifestes des composants control-plane
+        if [[ -f "$manifests_dir/kube-apiserver.yaml" ]] || \
+           [[ -f "$manifests_dir/kube-controller-manager.yaml" ]] || \
+           [[ -f "$manifests_dir/kube-scheduler.yaml" ]] || \
+           [[ -f "$manifests_dir/etcd.yaml" ]]; then
+            is_control_plane=true
+        fi
+    fi
+
+    if [[ "$is_control_plane" == true ]]; then
+        NODE_TYPE_DETECTED="control-plane"
+        log_success "Nœud détecté: CONTROL-PLANE (static pods détectés dans $manifests_dir)"
+        log_warning "Mode control-plane: kube-reserved ne sera PAS enforced (pour préserver les static pods critiques)"
+    else
+        NODE_TYPE_DETECTED="worker"
+        log_success "Nœud détecté: WORKER (aucun static pod control-plane trouvé)"
+        log_info "Mode worker: kube-reserved sera enforced normalement"
+    fi
+
+    echo "$NODE_TYPE_DETECTED"
 }
 
 ################################################################################
@@ -668,10 +718,22 @@ generate_kubelet_config_from_scratch() {
     local ram_mib=$7
     local eviction_hard_mem=$8
     local eviction_soft_mem=$9
+    local node_type=${10}
+
+    # Adapter enforceNodeAllocatable selon le type de nœud
+    local enforce_list
+    if [[ "$node_type" == "control-plane" ]]; then
+        enforce_list='  - "pods"
+  - "system-reserved"'
+    else
+        enforce_list='  - "pods"
+  - "system-reserved"
+  - "kube-reserved"'
+    fi
 
     cat <<EOF
 # Configuration générée automatiquement le $(date)
-# Profil: $PROFILE | Density-factor: $DENSITY_FACTOR
+# Profil: $PROFILE | Density-factor: $DENSITY_FACTOR | Type: $node_type
 # Nœud: ${vcpu} vCPU / ${ram_gib} GiB RAM
 
 apiVersion: kubelet.config.k8s.io/v1beta1
@@ -693,10 +755,10 @@ kubeReserved:
 # ============================================================
 # ENFORCEMENT DES RÉSERVATIONS
 # ============================================================
+# Type de nœud: $node_type
+# $(if [[ "$node_type" == "control-plane" ]]; then echo "kube-reserved NON enforced (préserve les static pods critiques)"; else echo "kube-reserved enforced (worker node)"; fi)
 enforceNodeAllocatable:
-  - "pods"
-  - "system-reserved"
-  - "kube-reserved"
+$enforce_list
 
 cgroupDriver: "systemd"
 cgroupRoot: "/"
@@ -756,6 +818,7 @@ generate_kubelet_config() {
     local ram_gib=$6
     local ram_mib=$7
     local output_file=$8
+    local node_type=$9
 
     # Calcul des seuils d'éviction
     read -r eviction_hard_mem eviction_soft_mem <<< $(calculate_eviction_thresholds "$ram_gib" "$ram_mib")
@@ -768,7 +831,7 @@ generate_kubelet_config() {
         cp "$KUBELET_CONFIG" "$output_file"
 
         # Ajouter un commentaire de traçabilité en haut du fichier
-        local header_comment="# Mis à jour automatiquement le $(date) - Profil: $PROFILE | Density-factor: $DENSITY_FACTOR"
+        local header_comment="# Mis à jour automatiquement le $(date) - Profil: $PROFILE | Density-factor: $DENSITY_FACTOR | Type: $node_type"
         sed -i.tmp "1i\\
 $header_comment
 " "$output_file"
@@ -787,8 +850,14 @@ $header_comment
         yq eval -i ".kubeReserved.memory = \"${kube_mem}Mi\"" "$output_file"
         yq eval -i ".kubeReserved.\"ephemeral-storage\" = \"5Gi\"" "$output_file"
 
-        # enforceNodeAllocatable
-        yq eval -i '.enforceNodeAllocatable = ["pods", "system-reserved", "kube-reserved"]' "$output_file"
+        # enforceNodeAllocatable (adapter selon le type de nœud)
+        if [[ "$node_type" == "control-plane" ]]; then
+            log_warning "Mode control-plane: enforcement de kube-reserved désactivé"
+            yq eval -i '.enforceNodeAllocatable = ["pods", "system-reserved"]' "$output_file"
+        else
+            log_info "Mode worker: enforcement complet (pods, system-reserved, kube-reserved)"
+            yq eval -i '.enforceNodeAllocatable = ["pods", "system-reserved", "kube-reserved"]' "$output_file"
+        fi
 
         # Cgroups
         yq eval -i '.cgroupDriver = "systemd"' "$output_file"
@@ -823,7 +892,7 @@ $header_comment
 
         # Générer une config complète depuis zéro
         generate_kubelet_config_from_scratch "$sys_cpu" "$sys_mem" "$kube_cpu" "$kube_mem" \
-            "$vcpu" "$ram_gib" "$ram_mib" "$eviction_hard_mem" "$eviction_soft_mem" > "$output_file"
+            "$vcpu" "$ram_gib" "$ram_mib" "$eviction_hard_mem" "$eviction_soft_mem" "$node_type" > "$output_file"
     fi
 }
 
@@ -867,6 +936,7 @@ display_summary() {
     local sys_mem=$4
     local kube_cpu=$5
     local kube_mem=$6
+    local node_type=$7
 
     local total_cpu=$((sys_cpu + kube_cpu))
     local total_mem=$((sys_mem + kube_mem))
@@ -874,7 +944,7 @@ display_summary() {
     local alloc_mem=$(echo "scale=2; ($ram_gib * 1024 - $total_mem) / 1024" | bc)
     local cpu_percent=$(echo "scale=2; ($total_cpu / ($vcpu * 1000)) * 100" | bc)
     local mem_percent=$(echo "scale=2; ($total_mem / ($ram_gib * 1024)) * 100" | bc)
-    
+
     echo ""
     echo "═══════════════════════════════════════════════════════════════════════════"
     echo "  CONFIGURATION KUBELET - RÉSERVATIONS CALCULÉES"
@@ -883,6 +953,7 @@ display_summary() {
     echo "Configuration nœud:"
     echo "  vCPU:              $vcpu"
     echo "  RAM:               $ram_gib GiB"
+    echo "  Type:              $node_type"
     echo "  Profil:            $PROFILE"
     echo "  Density-factor:    $DENSITY_FACTOR"
     echo ""
@@ -936,6 +1007,10 @@ main() {
                 TARGET_PODS="$2"
                 shift 2
                 ;;
+            --node-type)
+                NODE_TYPE="$2"
+                shift 2
+                ;;
             --dry-run)
                 DRY_RUN=true
                 shift
@@ -961,6 +1036,7 @@ main() {
 
     # Validation des entrées
     validate_profile "$PROFILE"
+    validate_node_type "$NODE_TYPE"
     validate_density_factor "$DENSITY_FACTOR"
 
     # Détection des ressources
@@ -970,6 +1046,14 @@ main() {
     RAM_GIB=$(detect_ram_gib)
 
     log_success "Détecté: ${VCPU} vCPU, ${RAM_GIB} GiB RAM (${RAM_MIB} MiB)"
+
+    # Détection du type de nœud (control-plane vs worker)
+    if [[ "$NODE_TYPE" == "auto" ]]; then
+        NODE_TYPE_DETECTED=$(detect_node_type)
+    else
+        NODE_TYPE_DETECTED="$NODE_TYPE"
+        log_info "Type de nœud forcé manuellement: $NODE_TYPE_DETECTED"
+    fi
 
     # Calcul automatique du density-factor si target-pods spécifié
     if [[ -n "$TARGET_PODS" ]]; then
@@ -1050,7 +1134,7 @@ main() {
     fi
 
     # Affichage du résumé
-    display_summary "$VCPU" "$RAM_GIB" "$SYS_CPU" "$SYS_MEM" "$KUBE_CPU" "$KUBE_MEM"
+    display_summary "$VCPU" "$RAM_GIB" "$SYS_CPU" "$SYS_MEM" "$KUBE_CPU" "$KUBE_MEM" "$NODE_TYPE_DETECTED"
 
     # Mode dry-run : afficher la config sans appliquer
     if [[ "$DRY_RUN" == true ]]; then
@@ -1063,7 +1147,7 @@ main() {
         mv "$temp_dryrun" "${temp_dryrun}.yaml"
         temp_dryrun="${temp_dryrun}.yaml"
 
-        generate_kubelet_config "$SYS_CPU" "$SYS_MEM" "$KUBE_CPU" "$KUBE_MEM" "$VCPU" "$RAM_GIB" "$RAM_MIB" "$temp_dryrun"
+        generate_kubelet_config "$SYS_CPU" "$SYS_MEM" "$KUBE_CPU" "$KUBE_MEM" "$VCPU" "$RAM_GIB" "$RAM_MIB" "$temp_dryrun" "$NODE_TYPE_DETECTED"
 
         echo "Configuration qui serait générée:"
         echo "───────────────────────────────────────────────────────────────────────────"
@@ -1099,7 +1183,7 @@ main() {
     temp_config="${temp_config}.yaml"
 
     log_info "Génération de la nouvelle configuration kubelet..."
-    generate_kubelet_config "$SYS_CPU" "$SYS_MEM" "$KUBE_CPU" "$KUBE_MEM" "$VCPU" "$RAM_GIB" "$RAM_MIB" "$temp_config"
+    generate_kubelet_config "$SYS_CPU" "$SYS_MEM" "$KUBE_CPU" "$KUBE_MEM" "$VCPU" "$RAM_GIB" "$RAM_MIB" "$temp_config" "$NODE_TYPE_DETECTED"
 
     # Validation YAML
     validate_yaml "$temp_config"
