@@ -1399,13 +1399,14 @@ Pour l'historique complet des versions, consultez les fichiers de changelog déd
 - **[CHANGELOG_v2.0.8.md](CHANGELOG_v2.0.8.md)** - Version actuelle (correctifs critiques ARM64)
 - Versions précédentes : voir le dossier `changelogs/` (si créé)
 
-### Version Actuelle : v2.0.8
+### Version Actuelle : v2.0.10
 
 **Correctifs critiques :**
 - ✅ Support ARM64 (arithmétique décimale)
 - ✅ Lock file robuste
 - ✅ Formatage YAML propre
 - ✅ Suite de tests unitaires (25 tests)
+- ✅ Tests compatibles `set -euo pipefail`
 
 Voir [CHANGELOG_v2.0.8.md](CHANGELOG_v2.0.8.md) pour les détails complets.
 
@@ -1476,5 +1477,5 @@ SOFTWARE.
 ---
 
 **Dernière mise à jour** : 21 oct 2025
-**Version du script** : 2.0.8
+**Version du script** : 2.0.10
 **Mainteneur** : Platform Engineering Team
