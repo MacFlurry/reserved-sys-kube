@@ -76,7 +76,7 @@ sudo chmod +x /usr/bin/yq
 
 Le script doit être exécuté en tant que **root** ou avec **sudo** :
 ```bash
-sudo ./configure-kubelet-reservations.sh
+sudo ./kubelet_auto_config.sh
 ```
 
 ---
@@ -90,10 +90,10 @@ sudo ./configure-kubelet-reservations.sh
 curl -O https://gitlab.com/omega8280051/reserved-sys-kube/-/raw/main/kubelet_auto_config.sh
 
 # Rendre exécutable
-chmod +x configure-kubelet-reservations.sh
+chmod +x kubelet_auto_config.sh
 
 # Vérifier les dépendances
-./configure-kubelet-reservations.sh --help
+./kubelet_auto_config.sh --help
 ```
 
 ### Méthode 2 : Via Git
@@ -101,7 +101,7 @@ chmod +x configure-kubelet-reservations.sh
 ```bash
 git clone https://gitlab.com/omega8280051/reserved-sys-kube.git
 cd reserved-sys-kube
-chmod +x configure-kubelet-reservations.sh
+chmod +x kubelet_auto_config.sh
 ```
 
 ### Méthode 3 : Déploiement sur tous les nœuds
@@ -110,8 +110,8 @@ chmod +x configure-kubelet-reservations.sh
 # Copier le script sur tous les nœuds via SSH
 NODES="node1 node2 node3"  # Remplacer par vos nœuds
 for node in $NODES; do
-    scp configure-kubelet-reservations.sh root@$node:/usr/local/bin/
-    ssh root@$node "chmod +x /usr/local/bin/configure-kubelet-reservations.sh"
+    scp kubelet_auto_config.sh root@$node:/usr/local/bin/
+    ssh root@$node "chmod +x /usr/local/bin/kubelet_auto_config.sh"
 done
 ```
 
@@ -122,7 +122,7 @@ done
 ### Syntaxe générale
 
 ```bash
-sudo ./configure-kubelet-reservations.sh [OPTIONS]
+sudo ./kubelet_auto_config.sh [OPTIONS]
 ```
 
 ### Options disponibles
@@ -130,10 +130,10 @@ sudo ./configure-kubelet-reservations.sh [OPTIONS]
 | Option | Description | Valeur par défaut |
 |--------|-------------|-------------------|
 | `--profile <profil>` | Profil de calcul : `gke`, `eks`, `conservative`, `minimal` | `gke` |
-| `--density-factor <float>` | Multiplicateur pour haute densité (1.0 à 3.0) | `1.0` |
+| `--density-factor <float>` | Multiplicateur pour haute densité (0.1 à 5.0, recommandé 0.5-3.0) | `1.0` |
 | `--target-pods <int>` | Nombre de pods cible (calcul auto du density-factor) | - |
 | `--dry-run` | Affiche la configuration sans l'appliquer | `false` |
-| `--backup` | Sauvegarde la configuration existante | `false` |
+| `--backup` | Crée un backup permanent timestampé (en plus des 4 backups rotatifs automatiques) | `false` |
 | `--help` | Affiche l'aide | - |
 
 ### Workflow recommandé
@@ -160,7 +160,7 @@ sudo ./configure-kubelet-reservations.sh [OPTIONS]
 
 **Exemple** :
 ```bash
-sudo ./configure-kubelet-reservations.sh --profile gke
+sudo ./kubelet_auto_config.sh --profile gke
 ```
 
 **Résultat typique (16 vCPU / 64 GiB)** :
@@ -180,7 +180,7 @@ sudo ./configure-kubelet-reservations.sh --profile gke
 
 **Exemple** :
 ```bash
-sudo ./configure-kubelet-reservations.sh --profile eks
+sudo ./kubelet_auto_config.sh --profile eks
 ```
 
 ---
@@ -196,7 +196,7 @@ sudo ./configure-kubelet-reservations.sh --profile eks
 
 **Exemple** :
 ```bash
-sudo ./configure-kubelet-reservations.sh --profile conservative
+sudo ./kubelet_auto_config.sh --profile conservative
 ```
 
 **Résultat typique (16 vCPU / 64 GiB)** :
@@ -216,7 +216,7 @@ sudo ./configure-kubelet-reservations.sh --profile conservative
 
 **Exemple** :
 ```bash
-sudo ./configure-kubelet-reservations.sh --profile minimal --dry-run
+sudo ./kubelet_auto_config.sh --profile minimal --dry-run
 ```
 
 ---
@@ -243,7 +243,7 @@ Le script peut **calculer automatiquement** le density-factor :
 
 ```bash
 # Cluster avec 110 pods/nœud maximum
-sudo ./configure-kubelet-reservations.sh --profile conservative --target-pods 110
+sudo ./kubelet_auto_config.sh --profile conservative --target-pods 110
 
 # Le script calcule automatiquement : density-factor = 1.5
 ```
@@ -253,22 +253,22 @@ sudo ./configure-kubelet-reservations.sh --profile conservative --target-pods 11
 #### Cluster avec 20 pods/nœud (faible densité)
 ```bash
 # Pas de facteur nécessaire
-sudo ./configure-kubelet-reservations.sh --profile gke
+sudo ./kubelet_auto_config.sh --profile gke
 ```
 
 #### Cluster avec 80 pods/nœud (haute densité)
 ```bash
 # Facteur 1.2 recommandé
-sudo ./configure-kubelet-reservations.sh --profile conservative --density-factor 1.2
+sudo ./kubelet_auto_config.sh --profile conservative --density-factor 1.2
 ```
 
 #### Cluster avec 110 pods/nœud (limite maximale)
 ```bash
 # Calcul automatique du facteur
-sudo ./configure-kubelet-reservations.sh --profile conservative --target-pods 110 --backup
+sudo ./kubelet_auto_config.sh --profile conservative --target-pods 110 --backup
 
 # Ou manuellement
-sudo ./configure-kubelet-reservations.sh --profile conservative --density-factor 1.5 --backup
+sudo ./kubelet_auto_config.sh --profile conservative --density-factor 1.5 --backup
 ```
 
 ---
@@ -279,7 +279,7 @@ sudo ./configure-kubelet-reservations.sh --profile conservative --density-factor
 
 ```bash
 # Voir la configuration qui serait appliquée, sans toucher au système
-sudo ./configure-kubelet-reservations.sh --dry-run
+sudo ./kubelet_auto_config.sh --dry-run
 
 # Sortie :
 # ═══════════════════════════════════════════════════════════════════════════
@@ -298,7 +298,7 @@ sudo ./configure-kubelet-reservations.sh --dry-run
 
 ```bash
 # Nœud généraliste, 30-50 pods maximum
-sudo ./configure-kubelet-reservations.sh --profile gke --backup
+sudo ./kubelet_auto_config.sh --profile gke --backup
 
 # Vérifier les logs kubelet
 sudo journalctl -u kubelet -f
@@ -308,13 +308,13 @@ sudo journalctl -u kubelet -f
 
 ```bash
 # Étape 1 : Dry-run pour vérifier
-sudo ./configure-kubelet-reservations.sh \
+sudo ./kubelet_auto_config.sh \
   --profile conservative \
   --target-pods 110 \
   --dry-run
 
 # Étape 2 : Application avec backup
-sudo ./configure-kubelet-reservations.sh \
+sudo ./kubelet_auto_config.sh \
   --profile conservative \
   --target-pods 110 \
   --backup
@@ -327,7 +327,7 @@ kubectl describe node $(hostname) | grep -A 10 Allocatable
 
 ```bash
 # Profil conservative avec facteur custom
-sudo ./configure-kubelet-reservations.sh \
+sudo ./kubelet_auto_config.sh \
   --profile conservative \
   --density-factor 1.3 \
   --backup
@@ -337,7 +337,7 @@ sudo ./configure-kubelet-reservations.sh \
 
 ```bash
 # Maximiser la capacité allocatable (avec précaution)
-sudo ./configure-kubelet-reservations.sh \
+sudo ./kubelet_auto_config.sh \
   --profile minimal \
   --dry-run  # Toujours tester d'abord !
 ```
@@ -379,11 +379,11 @@ for node in $NODES; do
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     
     # Copier le script
-    scp configure-kubelet-reservations.sh root@$node:/tmp/
+    scp kubelet_auto_config.sh root@$node:/tmp/
     
     # Exécuter
-    ssh root@$node "chmod +x /tmp/configure-kubelet-reservations.sh && \
-                    /tmp/configure-kubelet-reservations.sh \
+    ssh root@$node "chmod +x /tmp/kubelet_auto_config.sh && \
+                    /tmp/kubelet_auto_config.sh \
                     --profile $PROFILE \
                     --target-pods $TARGET_PODS \
                     --backup"
@@ -435,15 +435,15 @@ chmod +x deploy-manual.sh
     
     - name: Copier le script de configuration
       copy:
-        src: configure-kubelet-reservations.sh
-        dest: /usr/local/bin/configure-kubelet-reservations.sh
+        src: kubelet_auto_config.sh
+        dest: /usr/local/bin/kubelet_auto_config.sh
         mode: '0755'
         owner: root
         group: root
     
     - name: Exécuter la configuration (dry-run)
       command: >
-        /usr/local/bin/configure-kubelet-reservations.sh
+        /usr/local/bin/kubelet_auto_config.sh
         --profile {{ profile }}
         --target-pods {{ target_pods }}
         --dry-run
@@ -461,7 +461,7 @@ chmod +x deploy-manual.sh
     
     - name: Appliquer la configuration kubelet
       command: >
-        /usr/local/bin/configure-kubelet-reservations.sh
+        /usr/local/bin/kubelet_auto_config.sh
         --profile {{ profile }}
         --target-pods {{ target_pods }}
         {% if backup_enabled %}--backup{% endif %}
@@ -575,11 +575,11 @@ spec:
           apt update && apt install -y bc jq systemd
           
           # Copier le script depuis ConfigMap
-          cp /scripts/configure-kubelet-reservations.sh /tmp/
-          chmod +x /tmp/configure-kubelet-reservations.sh
+          cp /scripts/kubelet_auto_config.sh /tmp/
+          chmod +x /tmp/kubelet_auto_config.sh
           
           # Exécuter la configuration
-          chroot /host /tmp/configure-kubelet-reservations.sh \
+          chroot /host /tmp/kubelet_auto_config.sh \
             --profile conservative \
             --target-pods 110 \
             --backup
@@ -608,7 +608,7 @@ metadata:
   name: kubelet-config-script
   namespace: kube-system
 data:
-  configure-kubelet-reservations.sh: |
+  kubelet_auto_config.sh: |
     # Coller ici le contenu du script bash
 ```
 
@@ -716,45 +716,90 @@ kubectl delete deployment stress-test
 
 ### En cas de problème
 
-#### 1. Restaurer depuis le backup
+Le script v2.0.3+ conserve automatiquement **plusieurs niveaux de backups** pour faciliter les rollbacks.
+
+#### 1. Restaurer depuis les backups rotatifs (automatiques)
 
 ```bash
-# Le script crée automatiquement un backup si --backup est utilisé
-# Format : /var/lib/kubelet/config.yaml.backup.YYYYMMDD_HHMMSS
+# Le script conserve automatiquement les 4 dernières configurations réussies
+# Format : /var/lib/kubelet/config.yaml.last-success.{0,1,2,3}
+# .0 = plus récent, .3 = plus ancien
 
-# Lister les backups
-ls -lh /var/lib/kubelet/config.yaml.backup.*
+# Lister les backups rotatifs disponibles
+ls -lht /var/lib/kubelet/config.yaml.last-success.*
 
-# Restaurer le dernier backup
-LATEST_BACKUP=$(ls -t /var/lib/kubelet/config.yaml.backup.* | head -1)
-sudo cp "$LATEST_BACKUP" /var/lib/kubelet/config.yaml
+# Revenir à la dernière configuration (1 changement en arrière)
+sudo cp /var/lib/kubelet/config.yaml.last-success.0 /var/lib/kubelet/config.yaml
+sudo systemctl restart kubelet
 
-# Redémarrer kubelet
+# Revenir 2 changements en arrière
+sudo cp /var/lib/kubelet/config.yaml.last-success.1 /var/lib/kubelet/config.yaml
+sudo systemctl restart kubelet
+
+# Revenir 3 changements en arrière
+sudo cp /var/lib/kubelet/config.yaml.last-success.2 /var/lib/kubelet/config.yaml
+sudo systemctl restart kubelet
+
+# Revenir 4 changements en arrière (le plus ancien)
+sudo cp /var/lib/kubelet/config.yaml.last-success.3 /var/lib/kubelet/config.yaml
 sudo systemctl restart kubelet
 ```
 
-#### 2. Rollback automatique via script
+#### 2. Restaurer depuis les backups permanents (--backup)
+
+```bash
+# Si vous avez utilisé --backup, des backups permanents timestampés sont conservés
+# Format : /var/lib/kubelet/config.yaml.backup.YYYYMMDD_HHMMSS
+
+# Lister les backups permanents
+ls -lh /var/lib/kubelet/config.yaml.backup.*
+
+# Restaurer un backup permanent spécifique
+sudo cp /var/lib/kubelet/config.yaml.backup.20251021_101234 /var/lib/kubelet/config.yaml
+sudo systemctl restart kubelet
+
+# Ou restaurer le dernier backup permanent
+LATEST_BACKUP=$(ls -t /var/lib/kubelet/config.yaml.backup.* 2>/dev/null | head -1)
+sudo cp "$LATEST_BACKUP" /var/lib/kubelet/config.yaml
+sudo systemctl restart kubelet
+```
+
+#### 3. Script de rollback automatique
 
 ```bash
 #!/bin/bash
 # rollback-kubelet-config.sh
 
-LATEST_BACKUP=$(ls -t /var/lib/kubelet/config.yaml.backup.* 2>/dev/null | head -1)
+echo "=== Rollback Configuration Kubelet ==="
+echo ""
 
-if [[ -z "$LATEST_BACKUP" ]]; then
-    echo "Aucun backup trouvé"
-    exit 1
+# Essayer d'abord les backups rotatifs
+ROTATIF=$(ls -t /var/lib/kubelet/config.yaml.last-success.* 2>/dev/null | head -1)
+if [[ -n "$ROTATIF" ]]; then
+    echo "Backup rotatif trouvé : $ROTATIF"
+    sudo cp "$ROTATIF" /var/lib/kubelet/config.yaml
+    sudo systemctl restart kubelet
+    echo "✓ Rollback terminé depuis backup rotatif"
+    sudo systemctl status kubelet
+    exit 0
 fi
 
-echo "Restauration depuis : $LATEST_BACKUP"
-sudo cp "$LATEST_BACKUP" /var/lib/kubelet/config.yaml
-sudo systemctl restart kubelet
+# Sinon essayer les backups permanents
+PERMANENT=$(ls -t /var/lib/kubelet/config.yaml.backup.* 2>/dev/null | head -1)
+if [[ -n "$PERMANENT" ]]; then
+    echo "Backup permanent trouvé : $PERMANENT"
+    sudo cp "$PERMANENT" /var/lib/kubelet/config.yaml
+    sudo systemctl restart kubelet
+    echo "✓ Rollback terminé depuis backup permanent"
+    sudo systemctl status kubelet
+    exit 0
+fi
 
-echo "Rollback terminé. Vérifiez le status :"
-sudo systemctl status kubelet
+echo "✗ Aucun backup trouvé"
+exit 1
 ```
 
-#### 3. Configuration manuelle d'urgence
+#### 4. Configuration manuelle d'urgence
 
 Si le kubelet ne démarre plus :
 
@@ -793,7 +838,28 @@ Tous les autres paramètres conservent leurs valeurs par défaut Kubernetes.
 
 ### Q2 : Puis-je exécuter le script plusieurs fois ?
 
-**R** : Oui, le script est **idempotent**. Vous pouvez le relancer sans risque. Utilisez `--backup` pour conserver un historique.
+**R** : Oui, le script est **idempotent**. Vous pouvez le relancer sans risque.
+
+**Gestion automatique des backups** (depuis v2.0.3) :
+- ✅ **4 backups rotatifs automatiques** : Le script conserve automatiquement les 4 dernières configurations réussies (`.last-success.{0,1,2,3}`)
+- ✅ **Sans `--backup`** : Rotation automatique, `.0` = plus récent, `.3` = plus ancien
+- ✅ **Avec `--backup`** : Crée un backup permanent timestampé (conservé 90 jours) + rotation automatique
+
+**Exemple** :
+```bash
+# Première exécution
+sudo ./kubelet_auto_config.sh --profile gke
+# Crée : config.yaml.last-success.0
+
+# Deuxième exécution
+sudo ./kubelet_auto_config.sh --profile conservative
+# Rotation : .0 → .1
+# Crée : config.yaml.last-success.0 (nouveau)
+
+# Rollback vers la config précédente
+sudo cp /var/lib/kubelet/config.yaml.last-success.1 /var/lib/kubelet/config.yaml
+sudo systemctl restart kubelet
+```
 
 ### Q3 : Que se passe-t-il si mes pods dépassent l'allocatable après modification ?
 
@@ -804,7 +870,7 @@ Tous les autres paramètres conservent leurs valeurs par défaut Kubernetes.
 kubectl drain <node-name> --ignore-daemonsets --delete-emptydir-data
 
 # Appliquer la config
-sudo ./configure-kubelet-reservations.sh --profile conservative --target-pods 110 --backup
+sudo ./kubelet_auto_config.sh --profile conservative --target-pods 110 --backup
 
 # Rendre le nœud schedulable
 kubectl uncordon <node-name>
@@ -897,10 +963,10 @@ kubectl describe node <node>
 sudo cat /var/lib/kubelet/config.yaml | grep -A 3 "Reserved:"
 
 # 2. Reconfigurer avec un profil moins conservateur
-sudo ./configure-kubelet-reservations.sh --profile gke --backup
+sudo ./kubelet_auto_config.sh --profile gke --backup
 
 # 3. Ou réduire le density-factor
-sudo ./configure-kubelet-reservations.sh --profile conservative --density-factor 1.2 --backup
+sudo ./kubelet_auto_config.sh --profile conservative --density-factor 1.2 --backup
 ```
 
 ### Problème 3 : Nœud devient NotReady après configuration
@@ -929,7 +995,7 @@ kubectl describe node node1 | grep -A 20 "Conditions:"
 **Solution** :
 ```bash
 # Augmenter les réservations
-ssh node1 "sudo /usr/local/bin/configure-kubelet-reservations.sh \
+ssh node1 "sudo /usr/local/bin/kubelet_auto_config.sh \
   --profile conservative \
   --density-factor 1.5 \
   --backup"
@@ -956,7 +1022,7 @@ ssh node1 "free -h"
 **Solution** :
 ```bash
 # Augmenter system-reserved et kube-reserved
-sudo ./configure-kubelet-reservations.sh \
+sudo ./kubelet_auto_config.sh \
   --profile conservative \
   --density-factor 1.5 \
   --backup
@@ -972,7 +1038,7 @@ sudo vi /var/lib/kubelet/config.yaml
 
 **Symptômes** :
 ```bash
-./configure-kubelet-reservations.sh
+./kubelet_auto_config.sh
 # line 42: bc: command not found
 ```
 
@@ -993,17 +1059,17 @@ which bc jq systemctl
 
 **Symptômes** :
 ```bash
-./configure-kubelet-reservations.sh
-# bash: ./configure-kubelet-reservations.sh: Permission denied
+./kubelet_auto_config.sh
+# bash: ./kubelet_auto_config.sh: Permission denied
 ```
 
 **Solution** :
 ```bash
 # Rendre le script exécutable
-chmod +x configure-kubelet-reservations.sh
+chmod +x kubelet_auto_config.sh
 
 # Exécuter avec sudo
-sudo ./configure-kubelet-reservations.sh
+sudo ./kubelet_auto_config.sh
 ```
 
 ### Problème 7 : Les cgroups ne sont pas créés
@@ -1031,7 +1097,7 @@ sudo journalctl -u kubelet | grep -i cgroup
 # - "kube-reserved"
 
 # Réappliquer la configuration
-sudo ./configure-kubelet-reservations.sh --profile conservative --backup
+sudo ./kubelet_auto_config.sh --profile conservative --backup
 ```
 
 ### Problème 8 : Valeurs différentes entre nœuds du même type
@@ -1048,7 +1114,7 @@ sudo ./configure-kubelet-reservations.sh --profile conservative --backup
 ```bash
 # Standardiser sur tous les nœuds
 ansible all -i inventory.ini -m shell -a \
-  "/usr/local/bin/configure-kubelet-reservations.sh \
+  "/usr/local/bin/kubelet_auto_config.sh \
   --profile conservative \
   --target-pods 110 \
   --backup"
@@ -1177,12 +1243,12 @@ groups:
 
 ```bash
 # Le script doit appartenir à root et ne pas être modifiable par d'autres
-sudo chown root:root configure-kubelet-reservations.sh
-sudo chmod 750 configure-kubelet-reservations.sh
+sudo chown root:root kubelet_auto_config.sh
+sudo chmod 750 kubelet_auto_config.sh
 
 # Vérifier
-ls -l configure-kubelet-reservations.sh
-# -rwxr-x--- 1 root root 28472 Jan 20 10:30 configure-kubelet-reservations.sh
+ls -l kubelet_auto_config.sh
+# -rwxr-x--- 1 root root 28472 Jan 20 10:30 kubelet_auto_config.sh
 ```
 
 ### 2. Audit trail
@@ -1213,7 +1279,7 @@ sudo journalctl -t configure-kubelet-reservations
 VERSION="1.0.0"
 
 # Commit dans Git
-git add configure-kubelet-reservations.sh
+git add kubelet_auto_config.sh
 git commit -m "feat: script configuration kubelet v1.0.0"
 git tag v1.0.0
 git push origin v1.0.0
@@ -1936,6 +2002,6 @@ SOFTWARE.
 
 ---
 
-**Dernière mise à jour** : 20 oct 2025  
-**Version du README** : 1.0.0  
+**Dernière mise à jour** : 21 oct 2025
+**Version du README** : 2.0.4
 **Mainteneur** : Platform Engineering Team
