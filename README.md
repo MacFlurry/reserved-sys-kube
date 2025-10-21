@@ -10,17 +10,26 @@
 
 ## 📋 Table des matières
 
-- [Vue d'ensemble](#vue-densemble)
-- [Prérequis](#prérequis)
-- [Installation](#installation)
-- [Utilisation](#utilisation)
-- [Profils disponibles](#profils-disponibles)
-- [Exemples d'utilisation](#exemples-dutilisation)
-- [Déploiement sur un cluster](#déploiement-sur-un-cluster)
-- [Validation post-déploiement](#validation-post-déploiement)
-- [Rollback](#rollback)
-- [FAQ](#faq)
-- [Troubleshooting](#troubleshooting)
+- [Vue d'ensemble](#-vue-densemble)
+- [Prérequis](#-prérequis)
+- [Installation](#-installation)
+- [Utilisation](#-utilisation)
+- [Profils disponibles](#-profils-disponibles)
+- [Density-factor](#%EF%B8%8F-density-factor--adapter-selon-la-densité-de-pods)
+- [Exemples d'utilisation](#-exemples-dutilisation)
+- [Déploiement sur un cluster](#-déploiement-sur-un-cluster)
+- [Validation post-déploiement](#-validation-post-déploiement)
+- [Rollback](#-rollback)
+- [FAQ](#-faq)
+- [Troubleshooting](#-troubleshooting)
+- [Monitoring et métriques](#-monitoring-et-métriques)
+- [Sécurité et bonnes pratiques](#-sécurité-et-bonnes-pratiques)
+- [Ressources supplémentaires](#-ressources-supplémentaires)
+- [Contribution](#-contribution)
+- [Changelog](#-changelog-et-notes-de-version)
+- [Licence](#-licence)
+- [Support](#-support)
+- [Crédits](#-crédits)
 
 ---
 
