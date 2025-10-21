@@ -2,7 +2,10 @@
 # Fichiers de développement (locaux uniquement)
 REVUE_CODE_SENIOR.md
 REVIEW_TESTS_SENIOR.md
+REVIEW_DEV_CORRECTIONS.md
+for_claude-test_calculations.sh
 SUMMARY.txt
 debug_bom.sh
 note_technique_claude.md
+note_for_claude.md
 note_for_claude_do_not_upload_it_to_remote_gitlab.txt
