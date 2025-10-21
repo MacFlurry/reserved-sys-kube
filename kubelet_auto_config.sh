@@ -1,8 +1,13 @@
 #!/bin/bash
 ################################################################################
 # Script de configuration automatique des réservations kubelet
-# Version: 2.0.4
+# Version: 2.0.5
 # Compatible Kubernetes v1.32+, cgroups v1/v2, systemd
+#
+# Améliorations v2.0.5:
+#   - Merge intelligent avec configuration existante (préservation des tweaks)
+#   - Modification ciblée uniquement des champs gérés par le script
+#   - Support pour configurations personnalisées (maxPods, imageGC, etc.)
 #
 # Améliorations v2.0.4:
 #   - Protection contre les race conditions (lock file)
@@ -51,7 +56,7 @@
 set -euo pipefail
 
 # Version
-VERSION="2.0.4"
+VERSION="2.0.5"
 
 # Couleurs pour l'output
 RED='\033[0;31m'
@@ -503,7 +508,7 @@ calculate_eviction_thresholds() {
 # Génération de la configuration kubelet
 ################################################################################
 
-generate_kubelet_config() {
+generate_kubelet_config_from_scratch() {
     local sys_cpu=$1
     local sys_mem=$2
     local kube_cpu=$3
@@ -511,9 +516,8 @@ generate_kubelet_config() {
     local vcpu=$5
     local ram_gib=$6
     local ram_mib=$7
-
-    # Calcul des seuils d'éviction
-    read -r eviction_hard_mem eviction_soft_mem <<< $(calculate_eviction_thresholds "$ram_gib" "$ram_mib")
+    local eviction_hard_mem=$8
+    local eviction_soft_mem=$9
 
     cat <<EOF
 # Configuration générée automatiquement le $(date)
@@ -591,6 +595,86 @@ logging:
   verbosity: 2
   format: text
 EOF
+}
+
+generate_kubelet_config() {
+    local sys_cpu=$1
+    local sys_mem=$2
+    local kube_cpu=$3
+    local kube_mem=$4
+    local vcpu=$5
+    local ram_gib=$6
+    local ram_mib=$7
+    local output_file=$8
+
+    # Calcul des seuils d'éviction
+    read -r eviction_hard_mem eviction_soft_mem <<< $(calculate_eviction_thresholds "$ram_gib" "$ram_mib")
+
+    # Si le fichier de config kubelet existe, merger avec l'existant
+    if [[ -f "$KUBELET_CONFIG" ]]; then
+        log_info "Fusion avec la configuration existante (préservation des tweaks personnalisés)..."
+
+        # Copier l'existant comme base
+        cp "$KUBELET_CONFIG" "$output_file"
+
+        # Ajouter un commentaire de traçabilité en haut du fichier
+        local header_comment="# Mis à jour automatiquement le $(date) - Profil: $PROFILE | Density-factor: $DENSITY_FACTOR"
+        sed -i.tmp "1i\\
+$header_comment
+" "$output_file"
+        rm -f "${output_file}.tmp"
+
+        # Modifier UNIQUEMENT les champs gérés par ce script avec yq
+        log_info "Mise à jour des réservations système et Kubernetes..."
+
+        # systemReserved
+        yq eval -i ".systemReserved.cpu = \"${sys_cpu}m\"" "$output_file"
+        yq eval -i ".systemReserved.memory = \"${sys_mem}Mi\"" "$output_file"
+        yq eval -i ".systemReserved.\"ephemeral-storage\" = \"10Gi\"" "$output_file"
+
+        # kubeReserved
+        yq eval -i ".kubeReserved.cpu = \"${kube_cpu}m\"" "$output_file"
+        yq eval -i ".kubeReserved.memory = \"${kube_mem}Mi\"" "$output_file"
+        yq eval -i ".kubeReserved.\"ephemeral-storage\" = \"5Gi\"" "$output_file"
+
+        # enforceNodeAllocatable
+        yq eval -i '.enforceNodeAllocatable = ["pods", "system-reserved", "kube-reserved"]' "$output_file"
+
+        # Cgroups
+        yq eval -i '.cgroupDriver = "systemd"' "$output_file"
+        yq eval -i '.cgroupRoot = "/"' "$output_file"
+        yq eval -i '.systemReservedCgroup = "/system.slice"' "$output_file"
+        yq eval -i '.kubeReservedCgroup = "/kubelet.slice"' "$output_file"
+
+        # Seuils d'éviction
+        yq eval -i ".evictionHard.\"memory.available\" = \"${eviction_hard_mem}\"" "$output_file"
+        yq eval -i '.evictionHard."nodefs.available" = "10%"' "$output_file"
+        yq eval -i '.evictionHard."nodefs.inodesFree" = "5%"' "$output_file"
+        yq eval -i '.evictionHard."imagefs.available" = "15%"' "$output_file"
+
+        yq eval -i ".evictionSoft.\"memory.available\" = \"${eviction_soft_mem}\"" "$output_file"
+        yq eval -i '.evictionSoft."nodefs.available" = "15%"' "$output_file"
+        yq eval -i '.evictionSoft."imagefs.available" = "20%"' "$output_file"
+
+        yq eval -i '.evictionSoftGracePeriod."memory.available" = "1m30s"' "$output_file"
+        yq eval -i '.evictionSoftGracePeriod."nodefs.available" = "2m"' "$output_file"
+        yq eval -i '.evictionSoftGracePeriod."imagefs.available" = "2m"' "$output_file"
+
+        yq eval -i '.evictionPressureTransitionPeriod = "30s"' "$output_file"
+
+        yq eval -i '.evictionMinimumReclaim."memory.available" = "0Mi"' "$output_file"
+        yq eval -i '.evictionMinimumReclaim."nodefs.available" = "500Mi"' "$output_file"
+        yq eval -i '.evictionMinimumReclaim."imagefs.available" = "2Gi"' "$output_file"
+
+        log_success "Configuration fusionnée : tweaks existants préservés"
+
+    else
+        log_info "Aucune configuration existante, génération d'une configuration complète..."
+
+        # Générer une config complète depuis zéro
+        generate_kubelet_config_from_scratch "$sys_cpu" "$sys_mem" "$kube_cpu" "$kube_mem" \
+            "$vcpu" "$ram_gib" "$ram_mib" "$eviction_hard_mem" "$eviction_soft_mem" > "$output_file"
+    fi
 }
 
 ################################################################################
@@ -809,10 +893,23 @@ main() {
     if [[ "$DRY_RUN" == true ]]; then
         log_warning "Mode DRY-RUN activé - Configuration non appliquée"
         echo ""
+
+        # Créer un fichier temporaire pour le dry-run
+        local temp_dryrun
+        temp_dryrun=$(mktemp /tmp/kubelet-config-dryrun.XXXXXX)
+        mv "$temp_dryrun" "${temp_dryrun}.yaml"
+        temp_dryrun="${temp_dryrun}.yaml"
+
+        generate_kubelet_config "$SYS_CPU" "$SYS_MEM" "$KUBE_CPU" "$KUBE_MEM" "$VCPU" "$RAM_GIB" "$RAM_MIB" "$temp_dryrun"
+
         echo "Configuration qui serait générée:"
         echo "───────────────────────────────────────────────────────────────────────────"
-        generate_kubelet_config "$SYS_CPU" "$SYS_MEM" "$KUBE_CPU" "$KUBE_MEM" "$VCPU" "$RAM_GIB" "$RAM_MIB"
+        cat "$temp_dryrun"
         echo ""
+
+        # Nettoyage
+        rm -f "$temp_dryrun"
+
         log_info "Pour appliquer réellement, relancez sans --dry-run"
         exit 0
     fi
@@ -836,7 +933,7 @@ main() {
     temp_config="${temp_config}.yaml"
 
     log_info "Génération de la nouvelle configuration kubelet..."
-    generate_kubelet_config "$SYS_CPU" "$SYS_MEM" "$KUBE_CPU" "$KUBE_MEM" "$VCPU" "$RAM_GIB" "$RAM_MIB" > "$temp_config"
+    generate_kubelet_config "$SYS_CPU" "$SYS_MEM" "$KUBE_CPU" "$KUBE_MEM" "$VCPU" "$RAM_GIB" "$RAM_MIB" "$temp_config"
 
     # Validation YAML
     validate_yaml "$temp_config"

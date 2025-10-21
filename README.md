@@ -836,14 +836,31 @@ sudo journalctl -u kubelet -f
 
 ### Q1 : Le script modifie-t-il d'autres paramètres kubelet ?
 
-**R** : Non, le script génère une configuration **complète** mais ne modifie que :
-- `systemReserved`
-- `kubeReserved`
-- `enforceNodeAllocatable`
-- Les cgroups associés
-- Les seuils d'éviction (valeurs standard)
+**R** : Non, le script préserve **intelligemment** vos configurations existantes (depuis v2.0.5).
 
-Tous les autres paramètres conservent leurs valeurs par défaut Kubernetes.
+**Comportement :**
+- ✅ **Si `/var/lib/kubelet/config.yaml` existe** : Le script **fusionne** avec la configuration existante
+  - Modifie uniquement : `systemReserved`, `kubeReserved`, `enforceNodeAllocatable`, cgroups, seuils d'éviction
+  - **Préserve tous les autres paramètres** : `maxPods`, `imageGCHighThresholdPercent`, `rotateCertificates`, etc.
+  - Vos tweaks personnalisés sont **conservés** !
+
+- ✅ **Si aucune configuration n'existe** : Le script génère une configuration complète avec les valeurs par défaut Kubernetes
+
+**Exemple :**
+```yaml
+# Configuration existante avec tweaks
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+maxPods: 150                          # ← Tweak personnalisé
+imageGCHighThresholdPercent: 90       # ← Tweak personnalisé
+systemReserved:
+  cpu: "100m"                         # ← Sera mis à jour par le script
+  memory: "512Mi"                     # ← Sera mis à jour par le script
+
+# Après exécution du script
+# maxPods et imageGCHighThresholdPercent restent inchangés
+# Seuls systemReserved et kubeReserved sont mis à jour
+```
 
 ### Q2 : Puis-je exécuter le script plusieurs fois ?
 
@@ -1338,6 +1355,95 @@ Ouvrez une issue sur GitHub avec :
 ---
 
 ## 📝 Changelog et Notes de Version
+
+### v2.0.5 (2025-10-21)
+
+**🔀 Merge Intelligent - Préservation des Tweaks Existants**
+
+Cette version résout un problème critique identifié : le script remplaçait **toute** la configuration kubelet, perdant ainsi les tweaks personnalisés (`maxPods`, `imageGCHighThresholdPercent`, `rotateCertificates`, etc.).
+
+#### Problème Résolu
+
+**Avant v2.0.5** :
+```bash
+# Configuration existante avec tweaks
+maxPods: 150                    # ← Tweak important
+imageGCHighThresholdPercent: 90  # ← Configuration personnalisée
+
+# Après exécution du script
+# ❌ maxPods perdu (remplacé par valeur par défaut)
+# ❌ imageGCHighThresholdPercent perdu
+```
+
+**Avec v2.0.5** :
+```bash
+# Configuration existante avec tweaks
+maxPods: 150                    # ← Tweak important
+imageGCHighThresholdPercent: 90  # ← Configuration personnalisée
+
+# Après exécution du script
+# ✅ maxPods: 150 (préservé)
+# ✅ imageGCHighThresholdPercent: 90 (préservé)
+# ✅ systemReserved/kubeReserved mis à jour
+```
+
+#### Solution Implémentée
+
+**Merge intelligent avec `yq`** :
+1. **Si config existe** : Le script copie la config existante et modifie uniquement les champs gérés
+2. **Si config n'existe pas** : Le script génère une config complète par défaut
+
+**Champs modifiés par le script** :
+- `systemReserved.cpu/memory/ephemeral-storage`
+- `kubeReserved.cpu/memory/ephemeral-storage`
+- `enforceNodeAllocatable`
+- `cgroupDriver`, `cgroupRoot`, `systemReservedCgroup`, `kubeReservedCgroup`
+- `evictionHard.*`, `evictionSoft.*`, `evictionSoftGracePeriod.*`, etc.
+
+**Tous les autres champs sont préservés** : `maxPods`, `imageGCHighThresholdPercent`, `rotateCertificates`, `serializeImagePulls`, `registryPullQPS`, etc.
+
+#### Exemple Concret
+
+```bash
+# Avant : configuration avec maxPods=150
+$ cat /var/lib/kubelet/config.yaml | grep maxPods
+maxPods: 150
+
+# Exécution du script
+$ sudo ./kubelet_auto_config.sh --profile conservative
+
+# Après : maxPods préservé
+$ cat /var/lib/kubelet/config.yaml | grep maxPods
+maxPods: 150  # ✅ Toujours là !
+
+# systemReserved mis à jour
+$ cat /var/lib/kubelet/config.yaml | grep -A 3 systemReserved
+systemReserved:
+  cpu: "660m"      # ✅ Mis à jour
+  memory: "2355Mi" # ✅ Mis à jour
+```
+
+#### Traçabilité
+
+Le script ajoute un commentaire en haut du fichier pour tracer les modifications :
+
+```yaml
+# Mis à jour automatiquement le 2025-10-21 14:30:12 - Profil: conservative | Density-factor: 1.5
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+# ... config
+```
+
+#### Impact
+
+- ✅ **Production-safe** : Aucune perte de configuration personnalisée
+- ✅ **Idempotent** : Peut être relancé sans risque
+- ✅ **Rétrocompatible** : Fonctionne aussi sans config existante
+- ✅ **Transparent** : Log clair "Fusion avec la configuration existante"
+
+**Recommandation de mise à niveau** : ✅ **Fortement recommandé** pour tous les utilisateurs ayant des configurations kubelet personnalisées.
+
+---
 
 ### v2.0.4 (2025-10-21)
 
@@ -2012,5 +2118,5 @@ SOFTWARE.
 ---
 
 **Dernière mise à jour** : 21 oct 2025
-**Version du README** : 2.0.4
+**Version du README** : 2.0.5
 **Mainteneur** : Platform Engineering Team
