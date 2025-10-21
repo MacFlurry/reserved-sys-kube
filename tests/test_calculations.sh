@@ -58,14 +58,19 @@ assert_in_range() {
 
     ((TESTS_TOTAL++))
 
-    if (( value >= min && value <= max )); then
-        echo -e "${GREEN}✓${NC} $test_name (value=$value, range=[$min-$max])"
+    # Normaliser les valeurs en entiers pour éviter les problèmes avec (( ))
+    local value_int=$(printf "%.0f" "$value" 2>/dev/null || echo "$value")
+    local min_int=$(printf "%.0f" "$min" 2>/dev/null || echo "$min")
+    local max_int=$(printf "%.0f" "$max" 2>/dev/null || echo "$max")
+
+    if (( value_int >= min_int && value_int <= max_int )); then
+        echo -e "${GREEN}✓${NC} $test_name (value=$value_int, range=[$min_int-$max_int])"
         ((TESTS_PASSED++))
         return 0
     else
         echo -e "${RED}✗${NC} $test_name"
-        echo "  Value: $value"
-        echo "  Expected range: [$min-$max]"
+        echo "  Value: $value_int"
+        echo "  Expected range: [$min_int-$max_int]"
         ((TESTS_FAILED++))
         return 1
     fi
