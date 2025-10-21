@@ -1264,6 +1264,160 @@ Ouvrez une issue sur GitHub avec :
 
 ## 📝 Changelog et Notes de Version
 
+### v2.0.3 (2025-10-21)
+
+**🔄 Rotation des Backups Multi-Niveaux**
+
+**Problème Résolu** :
+Dans v2.0.2, un seul backup `.last-success` était conservé. Si l'utilisateur effectuait plusieurs modifications successives réussies, il ne pouvait pas revenir à une configuration antérieure (par exemple, 2 ou 3 changements en arrière).
+
+**Nouvelle Approche - Rotation Style Logrotate** :
+
+```bash
+# Structure des backups automatiques (rotation)
+/var/lib/kubelet/
+├── config.yaml                          # Config actuelle
+├── config.yaml.last-success.0           # Dernier backup (le plus récent)
+├── config.yaml.last-success.1           # Avant-dernier backup
+├── config.yaml.last-success.2           # 3ème backup en arrière
+└── config.yaml.last-success.3           # 4ème backup (le plus ancien)
+
+# Backups permanents (avec --backup)
+├── config.yaml.backup.20251021_101234   # Point de sauvegarde manuel
+└── config.yaml.backup.20251020_143022   # Point de sauvegarde manuel
+```
+
+**Fonctionnement de la Rotation** :
+
+```bash
+# Première exécution
+sudo ./kubelet_auto_config.sh --profile gke
+# Crée : config.yaml.last-success.0
+
+# Deuxième exécution (changement density-factor)
+sudo ./kubelet_auto_config.sh --profile gke --density-factor 1.2
+# Rotation : .0 → .1
+# Crée : config.yaml.last-success.0 (nouvelle config)
+
+# Troisième exécution (changement profil)
+sudo ./kubelet_auto_config.sh --profile conservative
+# Rotation : .1 → .2, .0 → .1
+# Crée : config.yaml.last-success.0 (nouvelle config)
+
+# Quatrième exécution
+sudo ./kubelet_auto_config.sh --profile conservative --density-factor 1.5
+# Rotation : .2 → .3, .1 → .2, .0 → .1
+# Crée : config.yaml.last-success.0
+
+# Cinquième exécution
+sudo ./kubelet_auto_config.sh --profile eks
+# Rotation : .3 → supprimé, .2 → .3, .1 → .2, .0 → .1
+# Crée : config.yaml.last-success.0
+```
+
+**Rollbacks Multi-Niveaux** :
+
+```bash
+# Revenir au dernier changement
+sudo cp /var/lib/kubelet/config.yaml.last-success.0 \
+         /var/lib/kubelet/config.yaml
+sudo systemctl restart kubelet
+
+# Revenir 2 changements en arrière
+sudo cp /var/lib/kubelet/config.yaml.last-success.1 \
+         /var/lib/kubelet/config.yaml
+sudo systemctl restart kubelet
+
+# Revenir 3 changements en arrière
+sudo cp /var/lib/kubelet/config.yaml.last-success.2 \
+         /var/lib/kubelet/config.yaml
+sudo systemctl restart kubelet
+
+# Revenir 4 changements en arrière (le plus ancien disponible)
+sudo cp /var/lib/kubelet/config.yaml.last-success.3 \
+         /var/lib/kubelet/config.yaml
+sudo systemctl restart kubelet
+```
+
+**Backups Permanents avec --backup** :
+
+```bash
+# Avant un changement majeur, créer un point de sauvegarde
+sudo ./kubelet_auto_config.sh --profile conservative --backup
+
+# Résultat :
+# - Backup permanent : config.yaml.backup.20251021_101234 (conservé 90 jours)
+# - Backup rotatif : config.yaml.last-success.0 (conservé dans rotation)
+
+# Rollback vers point de sauvegarde manuel
+sudo cp /var/lib/kubelet/config.yaml.backup.20251021_101234 \
+         /var/lib/kubelet/config.yaml
+sudo systemctl restart kubelet
+```
+
+**Avantages** :
+
+- ✅ **4 points de restauration automatiques** au lieu d'1 seul
+- ✅ **Historique des changements** : Revenir 2, 3 ou 4 modifications en arrière
+- ✅ **Pas de pollution** : Maximum 4 fichiers rotatifs
+- ✅ **Backups permanents optionnels** : --backup pour points de sauvegarde importants
+- ✅ **Standard Linux** : Même principe que logrotate, nginx, apache
+- ✅ **Auto-nettoyage** : Backups permanents > 90 jours supprimés
+
+**Cas d'Usage Réel** :
+
+```bash
+# Scénario : Configuration progressive d'un cluster
+
+# 1. Config initiale stable (6 mois)
+# État : config actuelle = STABLE
+
+# 2. Test profil conservative (créer point de sauvegarde)
+sudo ./kubelet_auto_config.sh --profile conservative --backup
+# Backups :
+#   - .last-success.0 (profil conservative)
+#   - .backup.20251021_100000 (point de sauvegarde STABLE)
+
+# 3. Ajustement density-factor
+sudo ./kubelet_auto_config.sh --profile conservative --density-factor 1.2
+# Backups :
+#   - .last-success.0 (conservative + density 1.2) ← NOUVEAU
+#   - .last-success.1 (conservative)
+#   - .backup.20251021_100000 (STABLE)
+
+# 4. Nouvelle tentative avec density 1.5
+sudo ./kubelet_auto_config.sh --profile conservative --density-factor 1.5
+# Backups :
+#   - .last-success.0 (conservative + density 1.5) ← NOUVEAU
+#   - .last-success.1 (conservative + density 1.2)
+#   - .last-success.2 (conservative)
+#   - .backup.20251021_100000 (STABLE)
+
+# 5. Problème détecté ! Trop d'évictions
+# Option A : Revenir 1 changement en arrière
+sudo cp /var/lib/kubelet/config.yaml.last-success.1 /var/lib/kubelet/config.yaml
+
+# Option B : Revenir 2 changements en arrière
+sudo cp /var/lib/kubelet/config.yaml.last-success.2 /var/lib/kubelet/config.yaml
+
+# Option C : Revenir à la config STABLE originale
+sudo cp /var/lib/kubelet/config.yaml.backup.20251021_100000 /var/lib/kubelet/config.yaml
+```
+
+**Sortie du Script** :
+
+```bash
+[SUCCESS] ✓ Kubelet actif et opérationnel
+[SUCCESS] Backup permanent conservé : /var/lib/kubelet/config.yaml.backup.20251021_140522
+[INFO]   → Backup manuel permanent (conservé jusqu'à 90 jours)
+[INFO] Rotation des backups automatiques...
+[INFO] Backup rotatif créé : /var/lib/kubelet/config.yaml.last-success.0
+[INFO]   → 3 backup(s) rotatif(s) disponibles : .last-success.{0..2}
+[INFO]   → .0 = plus récent, .2 = plus ancien
+```
+
+---
+
 ### v2.0.2 (2025-10-21)
 
 **🎯 Amélioration de la Gestion des Backups**
