@@ -1,8 +1,12 @@
 #!/bin/bash
 ################################################################################
 # Script de configuration automatique des réservations kubelet
-# Version: 2.0.0-production
+# Version: 2.0.2
 # Compatible Kubernetes v1.32+, cgroups v1/v2, systemd
+#
+# Améliorations v2.0.2:
+#   - Conservation intelligente des backups (.last-success)
+#   - Auto-nettoyage des anciens backups timestampés (>30j)
 #
 # Améliorations v2.0.0:
 #   - Validation complète des entrées
@@ -36,7 +40,7 @@
 set -euo pipefail
 
 # Version
-VERSION="2.0.0-production"
+VERSION="2.0.2"
 
 # Couleurs pour l'output
 RED='\033[0;31m'
@@ -809,10 +813,24 @@ main() {
     if systemctl is-active --quiet kubelet; then
         log_success "✓ Kubelet actif et opérationnel"
 
-        # Nettoyage du backup si tout est OK et que l'utilisateur n'a pas demandé de backup
+        # Gestion intelligente du backup
         if [[ "$BACKUP" != true ]] && [[ -n "$BACKUP_FILE" ]] && [[ -f "$BACKUP_FILE" ]]; then
-            log_info "Suppression du backup temporaire (utilisez --backup pour le conserver)"
-            rm -f "$BACKUP_FILE"
+            # Conserver comme .last-success au lieu de supprimer
+            LAST_SUCCESS_BACKUP="/var/lib/kubelet/config.yaml.last-success"
+            mv "$BACKUP_FILE" "$LAST_SUCCESS_BACKUP"
+
+            log_info "Backup de sécurité conservé : $LAST_SUCCESS_BACKUP"
+            log_info "  → Permet un rollback manuel si nécessaire"
+            log_info "  → Utilisez --backup pour conserver des backups timestampés multiples"
+
+            # Nettoyage automatique des anciens backups timestampés (>30 jours)
+            local old_count=$(find /var/lib/kubelet -name 'config.yaml.backup.2*' -mtime +30 2>/dev/null | wc -l)
+            if (( old_count > 0 )); then
+                find /var/lib/kubelet -name 'config.yaml.backup.2*' -mtime +30 -delete 2>/dev/null
+                log_info "Nettoyé $old_count ancien(s) backup(s) timestampé(s) > 30 jours"
+            fi
+        elif [[ "$BACKUP" == true ]] && [[ -n "$BACKUP_FILE" ]]; then
+            log_success "Backup timestampé conservé : $BACKUP_FILE"
         fi
     else
         log_error "✗ Kubelet non actif après redémarrage!"
