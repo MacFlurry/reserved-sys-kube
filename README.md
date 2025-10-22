@@ -306,6 +306,16 @@ sudo ./kubelet_auto_config.sh --profile gke --node-type control-plane
 
 Le **density-factor** est un multiplicateur appliqué aux réservations pour compenser la charge kubelet selon le nombre de pods par nœud.
 
+> 🍽️ **Métaphore du restaurant**
+>
+> Imagine ton nœud comme un restaurant avec un nombre fixe de couverts. Une partie des tables est
+> réservée à l’équipe (chef, plonge, bar) pour qu’elle puisse travailler confortablement : ce sont
+> les ressources `system-reserved` et `kube-reserved`. Les couverts restants sont pour les clients
+> (les pods). Si tu règles le density-factor sur `2.0`, tu bloques deux fois plus de tables pour
+> l’équipe, ce qui laisse moins de place aux clients. Si tu le baisses, tu libères des couverts
+> pour la salle. Ce facteur ajuste donc la marge de confort accordée au système par rapport aux
+> workloads.
+
 ### Tableau de recommandations
 
 | Pods/nœud | Density-factor | Commande |
