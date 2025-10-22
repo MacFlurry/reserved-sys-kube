@@ -521,110 +521,61 @@ chmod +x deploy-manual.sh
 
 > ✅ **Validé sur lab Vagrant** : Cette méthode a été testée et validée (voir [ansible/README.md](ansible/README.md))
 
-**Fichier** : `ansible/deploy-kubelet-config.yml`
+**Fichier** : `ansible/deploy-kubelet-config.yml` (version simplifiée)
 
 ```yaml
 ---
-- name: Configuration des réservations kubelet sur tous les nœuds
+- name: Configuration des réservations kubelet
   hosts: k8s_workers
   become: yes
   vars:
-    profile: "conservative"
+    profile: "gke"
     target_pods: 110
     backup_enabled: true
-  
+
   tasks:
-    - name: Vérifier les dépendances
+    - name: Vérifier dépendances (bc, jq)
       package:
-        name:
-          - bc
-          - jq
-          - systemd
+        name: [bc, jq]
         state: present
-    
-    - name: Copier le script de configuration
+
+    - name: Installer yq si nécessaire
+      # Installation automatique de yq v4
+      # (voir playbook complet pour les détails)
+
+    - name: Copier le script
       copy:
         src: kubelet_auto_config.sh
         dest: /usr/local/bin/kubelet_auto_config.sh
         mode: '0755'
-        owner: root
-        group: root
-    
-    - name: Exécuter la configuration (dry-run)
+
+    - name: Dry-run
       command: >
         /usr/local/bin/kubelet_auto_config.sh
         --profile {{ profile }}
         --target-pods {{ target_pods }}
         --dry-run
-      register: dryrun_output
-      changed_when: false
-    
-    - name: Afficher le résultat du dry-run
-      debug:
-        var: dryrun_output.stdout_lines
-    
-    - name: Pause pour validation
-      pause:
-        prompt: "Vérifiez les résultats dry-run. Continuer ? (Ctrl+C pour annuler)"
-      when: ansible_check_mode == false
-    
-    - name: Appliquer la configuration kubelet
+      failed_when: false
+
+    - name: Appliquer configuration
       command: >
         /usr/local/bin/kubelet_auto_config.sh
         --profile {{ profile }}
         --target-pods {{ target_pods }}
-        {% if backup_enabled %}--backup{% endif %}
-      register: apply_output
-    
-    - name: Afficher le résultat de l'application
-      debug:
-        var: apply_output.stdout_lines
-    
-    - name: Vérifier le status kubelet
+        --backup
+
+    - name: Vérifier kubelet
       systemd:
         name: kubelet
         state: started
-        enabled: yes
-      register: kubelet_status
-    
-    - name: Attendre la stabilisation
-      wait_for:
-        timeout: 30
-      delegate_to: localhost
-    
-    - name: Vérifier que le nœud est Ready
-      shell: kubectl get node {{ inventory_hostname }} -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
-      delegate_to: localhost
-      register: node_ready
-      until: node_ready.stdout == "True"
-      retries: 6
-      delay: 10
-    
-    - name: Afficher l'allocatable du nœud
-      shell: kubectl describe node {{ inventory_hostname }} | grep -A 10 "Allocatable:"
-      delegate_to: localhost
-      register: allocatable
-    
-    - debug:
-        var: allocatable.stdout_lines
-
-- name: Rapport final
-  hosts: localhost
-  gather_facts: no
-  tasks:
-    - name: Récapitulatif des nœuds configurés
-      debug:
-        msg: "Configuration appliquée sur {{ groups['k8s_workers'] | length }} nœuds"
 ```
 
-**Inventory Ansible** : `inventory.ini`
+**Inventory** : `ansible/inventory.ini`
 
 ```ini
 [k8s_workers]
 node1.example.com
 node2.example.com
-node3.example.com
-# ... (tous vos nœuds)
 
 [k8s_workers:vars]
 ansible_user=root
@@ -634,25 +585,41 @@ ansible_ssh_private_key_file=~/.ssh/id_rsa
 **Exécution** :
 
 ```bash
-# Dry-run sur tous les nœuds
-ansible-playbook -i inventory.ini deploy-kubelet-config.yml --check
+# Installer Ansible
+sudo apt update && sudo apt install -y ansible
 
-# Application réelle
+# Test de connectivité
+cd ansible
+ansible -i inventory.ini all -m ping
+
+# Déploiement
 ansible-playbook -i inventory.ini deploy-kubelet-config.yml
 
-# Application sur un groupe spécifique (phase progressive)
-ansible-playbook -i inventory.ini deploy-kubelet-config.yml --limit "node[1:22]"
-
-> ⚠️ Les `target-pods` élevés (`density-factor > 1.0`) imposent des minimums d’allocatable (25 % CPU / 20 %
-> RAM). Sur les petits nœuds de lab, le dry-run peut donc retourner un `ERROR` et la tâche ansible
-> échouera. Ajustez `profile` / `target_pods` en conséquence ou ne déployez pas sur ces machines.
+# Personnalisation
+ansible-playbook -i inventory.ini deploy-kubelet-config.yml \
+  -e "profile=conservative" \
+  -e "target_pods=80"
 ```
 
+**Résultats validés** (lab Vagrant, profil `gke`) :
+
+```
+PLAY RECAP:
+  cp1  : ok=14   changed=4    failed=0
+  w1   : ok=13   changed=4    failed=0
+
+Allocatable:
+  - cp1: 2670m CPU, 2.96 GiB RAM
+  - w1:  1700m CPU, 1.08 GiB RAM
+```
+
+> ⚠️ **Garde-fous** : Sur des nœuds contraints (≤ 2 vCPU / ≤ 2 GiB), les configurations agressives seront refusées (allocatable < 25% CPU / 20% RAM).
+
 📖 **Documentation complète** : Voir **[ansible/README.md](ansible/README.md)** pour :
-- Configuration de l'inventory selon votre contexte (depuis poste de travail ou depuis un nœud)
-- Installation automatique de yq
-- Exemples de résultats attendus sur un lab validé
-- Guide de troubleshooting détaillé
+- Playbook complet avec installation automatique de yq
+- Configuration inventory (depuis poste ou nœud cluster)
+- Guide troubleshooting détaillé
+- Exemples d'exécution complets
 
 ---
 
