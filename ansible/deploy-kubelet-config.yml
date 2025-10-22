@@ -1,0 +1,130 @@
+---
+- name: Configuration des réservations kubelet sur tous les nœuds
+  hosts: k8s_workers
+  become: yes
+  vars:
+    profile: "gke"  # Profil par défaut adapté au lab
+    target_pods: 110
+    backup_enabled: true
+
+  tasks:
+    - name: Vérifier les dépendances bc et jq
+      package:
+        name:
+          - bc
+          - jq
+        state: present
+
+    - name: Vérifier si yq est installé
+      stat:
+        path: /usr/local/bin/yq
+      register: yq_installed
+
+    - name: Installer yq si nécessaire
+      block:
+        - name: Télécharger yq
+          get_url:
+            url: "https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_arm64"
+            dest: /tmp/yq
+            mode: '0755'
+
+        - name: Installer yq dans /usr/local/bin
+          copy:
+            src: /tmp/yq
+            dest: /usr/local/bin/yq
+            mode: '0755'
+            owner: root
+            group: root
+            remote_src: yes
+      when: not yq_installed.stat.exists
+
+    - name: Copier le script de configuration
+      copy:
+        src: ../kubelet_auto_config.sh
+        dest: /usr/local/bin/kubelet_auto_config.sh
+        mode: '0755'
+        owner: root
+        group: root
+
+    - name: Exécuter la configuration (dry-run)
+      command: >
+        /usr/local/bin/kubelet_auto_config.sh
+        --profile {{ profile }}
+        --target-pods {{ target_pods }}
+        --dry-run
+      register: dryrun_output
+      changed_when: false
+      failed_when: false
+
+    - name: Afficher le résultat du dry-run
+      debug:
+        var: dryrun_output.stdout_lines
+
+    - name: Vérifier si dry-run a échoué
+      fail:
+        msg: "Le dry-run a échoué. Vérifiez les garde-fous ou ajustez le profil."
+      when: dryrun_output.rc != 0
+
+    - name: Pause pour validation
+      pause:
+        prompt: "Vérifiez les résultats dry-run ci-dessus. Appuyez sur Entrée pour continuer ou Ctrl+C puis A pour annuler"
+      when: not ansible_check_mode
+
+    - name: Appliquer la configuration kubelet
+      command: >
+        /usr/local/bin/kubelet_auto_config.sh
+        --profile {{ profile }}
+        --target-pods {{ target_pods }}
+        {% if backup_enabled %}--backup{% endif %}
+      register: apply_output
+      when: not ansible_check_mode
+
+    - name: Afficher le résultat de l'application
+      debug:
+        var: apply_output.stdout_lines
+      when: not ansible_check_mode and apply_output is defined
+
+    - name: Vérifier le status kubelet
+      systemd:
+        name: kubelet
+        state: started
+        enabled: yes
+      register: kubelet_status
+      when: not ansible_check_mode
+
+    - name: Attendre la stabilisation
+      wait_for:
+        timeout: 30
+      when: not ansible_check_mode
+
+    - name: Vérifier que le nœud est Ready
+      shell: kubectl get node {{ inventory_hostname_short }} -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
+      delegate_to: cp1
+      become: no
+      register: node_ready
+      until: node_ready.stdout == "True"
+      retries: 6
+      delay: 10
+      when: not ansible_check_mode
+      failed_when: false
+
+    - name: Afficher l'allocatable du nœud
+      shell: kubectl describe node {{ inventory_hostname_short }} | grep -A 10 "Allocatable:"
+      delegate_to: cp1
+      become: no
+      register: allocatable
+      when: not ansible_check_mode
+      failed_when: false
+
+    - name: Afficher les ressources allocatables
+      debug:
+        var: allocatable.stdout_lines
+      when: not ansible_check_mode and allocatable is defined and allocatable.stdout is defined
+
+- name: Rapport final
+  hosts: localhost
+  gather_facts: no
+  tasks:
+    - name: Récapitulatif des nœuds configurés
+      debug:
+        msg: "Configuration appliquée sur {{ groups['k8s_workers'] | length }} nœuds (cp1, w1)"

@@ -145,3 +145,58 @@ Si un test échoue :
 Tous les tests manuels se terminent avec `kubectl get nodes` → `cp1` & `w1` en `Ready`, et les backups `config.yaml.last-success.*` présents.
 
 > Les échecs ci-dessus sont attendus : ils valident les garde-fous introduits en v2.0.13.
+
+### Validation Méthode 2 : Déploiement Ansible
+
+**Date** : 22 octobre 2025
+**Contexte** : Validation complète du playbook Ansible sur lab Vagrant
+
+**Configuration** :
+- Ansible installé sur `cp1` (control-plane)
+- Authentification SSH par clé configurée entre `cp1` et `w1`
+- Profil : `gke`
+- Density-factor : 1.50 (appliqué automatiquement via calcul)
+
+**Playbook exécuté** :
+```bash
+cd /home/vagrant/ansible
+ansible-playbook -i inventory-from-cp1.ini deploy-kubelet-config.yml
+```
+
+**Résultats** :
+
+| Phase | Status | Détails |
+|-------|--------|---------|
+| Test connectivité | ✅ | `ansible -i inventory-from-cp1.ini all -m ping` → pong sur cp1 et w1 |
+| Installation yq | ✅ | Détecté comme déjà installé, tâche skippée |
+| Copie du script | ✅ | `kubelet_auto_config.sh` déployé dans `/usr/local/bin/` |
+| Dry-run | ✅ | Réservations calculées et affichées pour cp1 et w1 |
+| Pause validation | ⚠️ | Ignorée en mode non-interactif (warning) |
+| Application réelle | ✅ | Configuration appliquée sur les 2 nœuds |
+| Vérification kubelet | ✅ | Service actif sur cp1 et w1 |
+| Vérification nœuds Ready | ✅ | cp1 et w1 en Ready (après 40-50s stabilisation) |
+
+**Play Recap** :
+```
+cp1        : ok=14   changed=4    unreachable=0    failed=0
+w1         : ok=13   changed=4    unreachable=0    failed=0
+localhost  : ok=1    changed=0    unreachable=0    failed=0
+```
+
+**Allocatable après application** :
+- `k8s-lab-cp1` : CPU `2670m/3000m` (89%), RAM `2.96 GiB/3.80 GiB` (78%)
+- `k8s-lab-w1` : CPU `1700m/2000m` (85%), RAM `1.08 GiB/1.90 GiB` (57%)
+
+**Observations** :
+1. Le playbook gère correctement l'installation automatique de yq si nécessaire
+2. Les tasks de vérification post-application fonctionnent avec des retry (6 tentatives, délai 10s)
+3. Le mode non-interactif (stdin non disponible) est géré gracieusement avec un warning
+4. Les backups timestampés sont créés automatiquement : `/var/lib/kubelet/config.yaml.backup.20251022_124349`
+
+**Fichiers créés** :
+- `ansible/README.md` - Documentation complète de la méthode Ansible
+- `ansible/deploy-kubelet-config.yml` - Playbook validé
+- `ansible/inventory-from-cp1.ini` - Inventory pour exécution depuis un nœud du cluster
+- `ansible/inventory.ini` - Inventory pour exécution depuis un poste de travail
+
+**Conclusion** : ✅ La Méthode 2 (Ansible) est **entièrement fonctionnelle** et recommandée pour les déploiements sur clusters multi-nœuds.
