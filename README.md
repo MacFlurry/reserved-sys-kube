@@ -323,8 +323,12 @@ Le **density-factor** est un multiplicateur appliqué aux réservations pour com
 | **0-30** (faible) | `1.0` (baseline) | Par défaut |
 | **31-50** (standard) | `1.1` (+10%) | `--density-factor 1.1` |
 | **51-80** (élevée) | `1.2` (+20%) | `--density-factor 1.2` |
-| **81-110** (très élevée) | `1.5` (+50%) | `--density-factor 1.5` ou `--target-pods 110` |
+| **81-110** (très élevée) | `1.5` (+50%) | `--density-factor 1.5` ou `--target-pods 110`* |
 | **>110** (extrême) | `2.0` (+100%) | `--density-factor 2.0` + augmenter `maxPods` |
+
+> ⚠️ *Sur des nœuds modestes (≤ 2 vCPU / ≤ 2 GiB), le script refusera ces facteurs élevés :
+> il arrête l’exécution si l’allocatable projeté descend sous 25 % CPU ou 20 % RAM (30 %/25 %
+> pour un control-plane). Prévoyez des machines plus capacitaires avant de pousser la densité.*
 
 ### Calcul automatique
 
@@ -349,15 +353,20 @@ sudo ./kubelet_auto_config.sh --profile gke
 ```bash
 # Facteur 1.2 recommandé
 sudo ./kubelet_auto_config.sh --profile conservative --density-factor 1.2
+# Sur un control-plane, le facteur est plafonné à 1.0 : un warning signalera l'ajustement.
+# Sur un worker avec peu de mémoire, le script peut refuser cette configuration.
 ```
 
 #### Cluster avec 110 pods/nœud (limite maximale)
 ```bash
 # Calcul automatique du facteur
 sudo ./kubelet_auto_config.sh --profile conservative --target-pods 110 --backup
+# Si les ressources sont insuffisantes, le script refusera (allocatable < seuil minimal).
 
 # Ou manuellement
 sudo ./kubelet_auto_config.sh --profile conservative --density-factor 1.5 --backup
+# Sur control-plane, le facteur sera ramené automatiquement à 1.0.
+# Sur petit worker, la commande peut être bloquée car les réservations dépassent la capacité.
 ```
 
 ---
