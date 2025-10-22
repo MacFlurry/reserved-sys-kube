@@ -1,0 +1,122 @@
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: kubelet-config-updater
+  namespace: kube-system
+  labels:
+    app: kubelet-config-updater
+spec:
+  selector:
+    matchLabels:
+      app: kubelet-config-updater
+  template:
+    metadata:
+      labels:
+        app: kubelet-config-updater
+    spec:
+      hostNetwork: true
+      hostPID: true
+      priorityClassName: system-node-critical
+      tolerations:
+      - effect: NoSchedule
+        operator: Exists
+      - effect: NoExecute
+        operator: Exists
+      containers:
+      - name: updater
+        image: ubuntu:24.04
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -euo pipefail
+
+          echo "=== DaemonSet kubelet-config-updater démarré sur $(hostname) ==="
+          echo "Node: $NODE_NAME"
+          echo ""
+
+          # Installation des dépendances dans le conteneur
+          echo "Installation des dépendances (bc, jq, wget)..."
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -qq > /dev/null 2>&1
+          apt-get install -y -qq bc jq wget > /dev/null 2>&1
+
+          # Installation de yq v4 (ARM64)
+          echo "Installation de yq v4..."
+          wget -qO /tmp/yq https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_arm64
+          chmod +x /tmp/yq
+
+          # Copier yq sur l'hôte
+          cp /tmp/yq /host/usr/local/bin/yq
+
+          # Copier le script depuis ConfigMap vers l'hôte
+          echo "Copie du script kubelet_auto_config.sh..."
+          cp /scripts/kubelet_auto_config.sh /host/tmp/kubelet_auto_config.sh
+          chmod +x /host/tmp/kubelet_auto_config.sh
+
+          echo ""
+          echo "Exécution de la configuration kubelet..."
+          echo "  Profil: gke"
+          echo "  Target pods: 80"
+          echo "  Backup: activé"
+          echo ""
+
+          # Exécuter la configuration via chroot
+          if chroot /host /tmp/kubelet_auto_config.sh \
+            --profile gke \
+            --target-pods 80 \
+            --backup; then
+              echo ""
+              echo "✓ Configuration terminée avec succès sur $NODE_NAME"
+              echo ""
+              echo "Le pod va maintenant rester actif. Vous pouvez:"
+              echo "  - Vérifier les logs: kubectl logs -n kube-system $HOSTNAME"
+              echo "  - Supprimer le DaemonSet une fois terminé"
+              echo ""
+
+              # Garder le pod actif pour inspection
+              sleep infinity
+          else
+              EXIT_CODE=$?
+              echo ""
+              echo "ERREUR: La configuration a échoué (exit code: $EXIT_CODE)"
+              echo "Raisons possibles:"
+              echo "  - Garde-fous activés (allocatable < seuils minimums)"
+              echo "  - Nœud avec ressources insuffisantes"
+              echo "  - Problème de permissions"
+              echo ""
+              echo "Le pod va crasher et redémarrer. Examinez les logs ci-dessus."
+              exit 1
+          fi
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: HOSTNAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: host-root
+          mountPath: /host
+        - name: scripts
+          mountPath: /scripts
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+      volumes:
+      - name: host-root
+        hostPath:
+          path: /
+      - name: scripts
+        configMap:
+          name: kubelet-config-script
+          defaultMode: 0755
