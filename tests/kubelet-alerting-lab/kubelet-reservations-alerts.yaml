@@ -1,0 +1,64 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: kubelet-reservations
+  namespace: monitoring
+  labels:
+    release: kube-prometheus
+    app.kubernetes.io/instance: kube-prometheus
+    app.kubernetes.io/managed-by: manual
+    app.kubernetes.io/name: kubelet-reservations
+spec:
+  groups:
+    - name: kubelet-reservations
+      interval: 30s
+      rules:
+        - alert: KubeletHighCPUThrottling
+          expr: |
+            rate(container_cpu_cfs_throttled_seconds_total{container="kubelet"}[5m]) > 0.1
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Kubelet throttling CPU élevé sur {{ $labels.node }}"
+            description: "Le kubelet sur {{ $labels.node }} subit un throttling CPU de {{ $value | humanizePercentage }}. Augmentez kube-reserved CPU."
+
+        - alert: KubeletPLEGHighLatency
+          expr: |
+            histogram_quantile(0.99, rate(kubelet_pleg_relist_duration_seconds_bucket[5m])) > 5
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "PLEG latency élevée sur {{ $labels.node }}"
+            description: "P99 PLEG latency = {{ $value }}s (seuil: 5s). Considérez augmenter kube-reserved ou réduire la densité de pods."
+
+        - alert: KubeletHighMemoryUsage
+          expr: |
+            process_resident_memory_bytes{job="kubelet"} / 1024 / 1024 / 1024 > 4
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Consommation mémoire kubelet élevée sur {{ $labels.instance }}"
+            description: "Kubelet utilise {{ $value | humanize }}GiB de RAM. Augmentez kube-reserved memory."
+
+        - alert: FrequentPodEvictions
+          expr: |
+            rate(kube_pod_status_reason{reason="Evicted"}[15m]) * 60 > 5
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Évictions fréquentes détectées"
+            description: "{{ $value | humanize }} évictions/min. Vérifiez les réservations system-reserved et kube-reserved."
+
+        - alert: NodeLowAllocatable
+          expr: |
+            (kube_node_status_allocatable{resource="cpu"} / kube_node_status_capacity{resource="cpu"}) < 0.8
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Allocatable CPU faible sur {{ $labels.node }}"
+            description: "Seulement {{ $value | humanizePercentage }} de CPU allocatable. Réservations potentiellement trop élevées."

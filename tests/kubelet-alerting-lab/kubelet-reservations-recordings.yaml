@@ -1,0 +1,71 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: kubelet-reservations-recordings
+  namespace: monitoring
+  labels:
+    release: kube-prometheus
+    app.kubernetes.io/instance: kube-prometheus
+    app.kubernetes.io/managed-by: manual
+    app.kubernetes.io/name: kubelet-reservations-recordings
+spec:
+  groups:
+    - name: kubelet-reservations
+      rules:
+        - record: kubelet_system_reserved_cpu_cores
+          expr: |
+            sum by (node) (kube_node_info{node="k8s-lab-cp1"} * 0 + 0.12)
+            OR
+            sum by (node) (kube_node_info{node="k8s-lab-w1"} * 0 + 0.12)
+
+        - record: kubelet_kube_reserved_cpu_cores
+          expr: |
+            sum by (node) (kube_node_info{node="k8s-lab-cp1"} * 0 + 0.10)
+            OR
+            sum by (node) (kube_node_info{node="k8s-lab-w1"} * 0 + 0.12)
+
+        - record: kubelet_system_reserved_memory_bytes
+          expr: |
+            sum by (node) (kube_node_info{node="k8s-lab-cp1"} * 0 + 171 * 1024 * 1024)
+            OR
+            sum by (node) (kube_node_info{node="k8s-lab-w1"} * 0 + 156 * 1024 * 1024)
+
+        - record: kubelet_kube_reserved_memory_bytes
+          expr: |
+            sum by (node) (kube_node_info{node="k8s-lab-cp1"} * 0 + 288 * 1024 * 1024)
+            OR
+            sum by (node) (kube_node_info{node="k8s-lab-w1"} * 0 + 319 * 1024 * 1024)
+
+        - record: kubelet_memory_eviction_bytes
+          expr: |
+            sum by (node) (
+              kube_node_status_capacity{resource="memory",unit="byte"}
+              - kube_node_status_allocatable{resource="memory",unit="byte"}
+            )
+            - kubelet_system_reserved_memory_bytes
+            - kubelet_kube_reserved_memory_bytes
+
+        - record: kubelet_system_reserved_cpu_percent
+          expr: |
+            kubelet_system_reserved_cpu_cores
+            / on(node) group_left() kube_node_status_capacity{resource="cpu",unit="core"} * 100
+
+        - record: kubelet_kube_reserved_cpu_percent
+          expr: |
+            kubelet_kube_reserved_cpu_cores
+            / on(node) group_left() kube_node_status_capacity{resource="cpu",unit="core"} * 100
+
+        - record: kubelet_system_reserved_memory_percent
+          expr: |
+            kubelet_system_reserved_memory_bytes
+            / on(node) group_left() kube_node_status_capacity{resource="memory",unit="byte"} * 100
+
+        - record: kubelet_kube_reserved_memory_percent
+          expr: |
+            kubelet_kube_reserved_memory_bytes
+            / on(node) group_left() kube_node_status_capacity{resource="memory",unit="byte"} * 100
+
+        - record: kubelet_memory_eviction_percent
+          expr: |
+            kubelet_memory_eviction_bytes
+            / on(node) group_left() kube_node_status_capacity{resource="memory",unit="byte"} * 100

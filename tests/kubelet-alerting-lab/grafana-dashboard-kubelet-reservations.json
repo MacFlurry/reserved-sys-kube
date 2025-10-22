@@ -1,0 +1,310 @@
+{
+  "schemaVersion": 38,
+  "version": 1,
+  "title": "Kubelet Reservations Overview",
+  "uid": "kubelet-reservations",
+  "tags": ["kubelet", "reservations", "kubernetes"],
+  "timezone": "",
+  "refresh": "30s",
+  "editable": true,
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": ["10s", "30s", "1m", "5m", "15m"],
+    "time_options": ["1h", "6h", "12h", "24h", "2d", "7d"]
+  },
+  "templating": {
+    "list": [
+      {
+        "type": "datasource",
+        "name": "DS_PROMETHEUS",
+        "query": "prometheus",
+        "current": {
+          "selected": true,
+          "text": "Prometheus",
+          "value": "Prometheus"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "CPU system-reserved (cores)",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 7, "w": 12, "x": 0, "y": 0},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "kubelet_system_reserved_cpu_cores",
+          "legendFormat": "system {{node}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cores",
+          "color": {"mode": "palette-classic"}
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {"displayMode": "table", "placement": "bottom"}
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "CPU kube-reserved (cores)",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 7, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "kubelet_kube_reserved_cpu_cores",
+          "legendFormat": "kube {{node}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cores",
+          "color": {"mode": "palette-classic"}
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {"displayMode": "table", "placement": "bottom"}
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "CPU allocatable (cores)",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 7, "w": 24, "x": 0, "y": 7},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "kube_node_status_allocatable{resource=\"cpu\",unit=\"core\"}",
+          "legendFormat": "{{node}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cores",
+          "color": {"mode": "palette-classic"}
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {"displayMode": "table", "placement": "bottom"}
+      }
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Mémoire system-reserved (Mi)",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 7, "w": 8, "x": 0, "y": 14},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "kubelet_system_reserved_memory_bytes / 1024 / 1024",
+          "legendFormat": "system {{node}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "mebibytes",
+          "decimals": 1,
+          "color": {"mode": "palette-classic"}
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {"displayMode": "table", "placement": "bottom"}
+      }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Mémoire kube-reserved (Mi)",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 7, "w": 8, "x": 8, "y": 14},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "kubelet_kube_reserved_memory_bytes / 1024 / 1024",
+          "legendFormat": "kube {{node}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "mebibytes",
+          "decimals": 1,
+          "color": {"mode": "palette-classic"}
+        }
+      },
+      "options": {
+        "legend": {"displayMode": "table", "placement": "bottom"}
+      }
+    },
+    {
+      "id": 23,
+      "type": "timeseries",
+      "title": "Mémoire éviction (Mi)",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 7, "w": 8, "x": 16, "y": 14},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "kubelet_memory_eviction_bytes / 1024 / 1024",
+          "legendFormat": "eviction {{node}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "mebibytes",
+          "decimals": 1,
+          "color": {"mode": "palette-classic"}
+        }
+      },
+      "options": {
+        "legend": {"displayMode": "table", "placement": "bottom"}
+      }
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "Mémoire allocatable (GiB)",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 7, "w": 24, "x": 0, "y": 21},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "kube_node_status_allocatable{resource=\"memory\",unit=\"byte\"} / 1024 / 1024 / 1024",
+          "legendFormat": "{{node}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "gibibytes",
+          "decimals": 2,
+          "color": {"mode": "palette-classic"}
+        }
+      },
+      "options": {
+        "legend": {"displayMode": "table", "placement": "bottom"}
+      }
+    },
+    {
+      "id": 30,
+      "type": "timeseries",
+      "title": "CPU réservée (%) - détail",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 6, "w": 12, "x": 0, "y": 28},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "kubelet_system_reserved_cpu_percent",
+          "legendFormat": "system {{node}}"
+        },
+        {
+          "refId": "B",
+          "expr": "kubelet_kube_reserved_cpu_percent",
+          "legendFormat": "kube {{node}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 2,
+          "color": {"mode": "palette-classic"}
+        }
+      },
+      "options": {
+        "legend": {"displayMode": "table", "placement": "bottom"}
+      }
+    },
+    {
+      "id": 31,
+      "type": "timeseries",
+      "title": "Mémoire réservée (%) - détail",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 6, "w": 12, "x": 12, "y": 28},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "kubelet_system_reserved_memory_percent",
+          "legendFormat": "system {{node}}"
+        },
+        {
+          "refId": "B",
+          "expr": "kubelet_kube_reserved_memory_percent",
+          "legendFormat": "kube {{node}}"
+        },
+        {
+          "refId": "C",
+          "expr": "kubelet_memory_eviction_percent",
+          "legendFormat": "eviction {{node}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 2,
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 60,
+            "stacking": {"mode": "normal", "group": "A"}
+          }
+        }
+      },
+      "options": {
+        "legend": {"displayMode": "table", "placement": "bottom"}
+      }
+    },
+    {
+      "id": 32,
+      "type": "timeseries",
+      "title": "Mémoire réservée (Mi) - détail",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 7, "w": 24, "x": 0, "y": 34},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "kubelet_system_reserved_memory_bytes / 1024 / 1024",
+          "legendFormat": "system {{node}}"
+        },
+        {
+          "refId": "B",
+          "expr": "kubelet_kube_reserved_memory_bytes / 1024 / 1024",
+          "legendFormat": "kube {{node}}"
+        },
+        {
+          "refId": "C",
+          "expr": "kubelet_memory_eviction_bytes / 1024 / 1024",
+          "legendFormat": "eviction {{node}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "mebibytes",
+          "decimals": 1,
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 60,
+            "stacking": {"mode": "normal", "group": "A"}
+          }
+        }
+      },
+      "options": {
+        "legend": {"displayMode": "table", "placement": "bottom"}
+      }
+    }
+  ]
+}
