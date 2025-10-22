@@ -1491,7 +1491,9 @@ Ouvrez une issue sur GitHub avec :
 
 Pour l'historique complet des versions, consultez les fichiers de changelog dédiés :
 
-- **[CHANGELOG_v2.0.14.md](CHANGELOG_v2.0.14.md)** - Version actuelle (validation complète des 3 méthodes de déploiement)
+- **[CHANGELOG_v2.0.16.md](CHANGELOG_v2.0.16.md)** - Version actuelle (installation automatique des dépendances)
+- **[CHANGELOG_v2.0.15.md](CHANGELOG_v2.0.15.md)** - Lab monitoring kubelet (Prometheus/Grafana)
+- **[CHANGELOG_v2.0.14.md](CHANGELOG_v2.0.14.md)** - Validation complète des 3 méthodes de déploiement
 - **[CHANGELOG_v2.0.13.md](CHANGELOG_v2.0.13.md)** - Garde-fous allocatable & diff automatiques
 - **[CHANGELOG_v2.0.12.md](CHANGELOG_v2.0.12.md)** - Réservations éphémères adaptatives & robustesse kubelet
 - **[CHANGELOG_v2.0.11.md](CHANGELOG_v2.0.11.md)** - Détection automatique control-plane/worker
@@ -1500,20 +1502,20 @@ Pour l'historique complet des versions, consultez les fichiers de changelog déd
 - **[CHANGELOG_v2.0.8.md](CHANGELOG_v2.0.8.md)** - Correctifs critiques ARM64
 - Versions précédentes : voir le dossier `changelogs/` (si créé)
 
-### Version Actuelle : v2.0.14
+### Version Actuelle : v2.0.16
 
-**Nouveautés v2.0.14 (Documentation et validation) :**
-- ✅ **Méthode 1 (Manuel)** : Scripts SSH validés et documentés
-- ✅ **Méthode 2 (Ansible)** : Playbooks complets testés sur lab Vagrant (cp1 + w1)
-  - Installation automatique de yq
-  - Play Recap: 14/13 tasks OK, allocatable optimisé
-  - Guide détaillé : [ansible/README.md](ansible/README.md)
-- ✅ **Méthode 3 (DaemonSet)** : Déploiement Kubernetes avancé validé
-  - Script de déploiement automatique (generate-daemonset.sh)
-  - Gains: +66m CPU/+137Mi RAM (cp1), +60m CPU/+119Mi RAM (w1)
-  - Guide détaillé : [daemonset/README.md](daemonset/README.md)
-- ✅ README principal cohérent avec les 3 méthodes validées
-- ✅ Tests complets sur lab ARM64 (2 nœuds)
+**Nouveautés v2.0.16 (Installation automatique des dépendances) :**
+- ✅ **Installation automatique** : Le script installe automatiquement `bc`, `jq`, et `yq v4` si manquants
+- ✅ **Détection d'architecture** : Support ARM64 et AMD64 automatique pour yq
+- ✅ **Remplacement automatique** : Remplace yq Python v3 par yq v4 (mikefarah) si détecté
+- ✅ **Zero-config** : Une seule commande suffit, aucune préparation manuelle
+- ✅ **Gain de temps** : 5-10 minutes économisées par installation
+- ✅ **Cohérence** : Même logique que le playbook Ansible
+
+**Versions précédentes notables :**
+- v2.0.15 : Lab monitoring kubelet (Prometheus/Grafana, alertes, dashboard)
+- v2.0.14 : Validation des 3 méthodes de déploiement (Manuel, Ansible, DaemonSet)
+- v2.0.13 : Garde-fous allocatable, diff automatiques, réservations éphémères
 
 **Script version v2.0.13 (inclus) :**
 - ✅ Garde-fous : density-factor plafonné sur control-planes, arrêt si allocatable < 25% CPU / 20% RAM
@@ -1523,7 +1525,7 @@ Pour l'historique complet des versions, consultez les fichiers de changelog déd
 - ✅ Support ARM64 complet & suite de tests unitaires (38/38)
 - ✅ Compatible `set -euo pipefail`
 
-Voir [CHANGELOG_v2.0.13.md](CHANGELOG_v2.0.13.md) pour les détails de la version script.
+Voir [CHANGELOG_v2.0.16.md](CHANGELOG_v2.0.16.md) pour les détails complets de la version actuelle.
 
 ---
 ## 📄 Licence
