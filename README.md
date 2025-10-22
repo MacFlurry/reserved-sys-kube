@@ -318,17 +318,22 @@ sudo ./kubelet_auto_config.sh --profile gke --node-type control-plane
 
 ### Concept
 
-Le **density-factor** est un multiplicateur appliqué aux réservations pour compenser la charge kubelet selon le nombre de pods par nœud.
+Le **density-factor** est un multiplicateur appliqué aux réservations pour **adapter les ressources kubelet selon la charge**.
 
-> 🍽️ **Métaphore du restaurant**
->
-> Imagine ton nœud comme un restaurant avec un nombre fixe de couverts. Une partie des tables est
-> réservée à l’équipe (chef, plonge, bar) pour qu’elle puisse travailler confortablement : ce sont
-> les ressources `system-reserved` et `kube-reserved`. Les couverts restants sont pour les clients
-> (les pods). Si tu règles le density-factor sur `2.0`, tu bloques deux fois plus de tables pour
-> l’équipe, ce qui laisse moins de place aux clients. Si tu le baisses, tu libères des couverts
-> pour la salle. Ce facteur ajuste donc la marge de confort accordée au système par rapport aux
-> workloads.
+**Pourquoi ?** Plus il y a de pods sur un nœud, plus kubelet consomme de ressources :
+
+- **Réconciliation** : Kubelet vérifie l'état de chaque pod toutes les 10 secondes (PLEG - Pod Lifecycle Event Generator)
+- **Health checks** : Exécution des liveness/readiness probes de tous les pods
+- **API calls** : Communication avec l'API server et le container runtime (containerd/CRI-O)
+- **Logging & metrics** : Collecte de logs et métriques de tous les containers
+- **Watch operations** : Surveillance des changements d'état des pods, secrets, configmaps
+
+**Règle simple** :
+- **30 pods** → density-factor **1.0** (baseline, réservations de base)
+- **80 pods** → density-factor **1.2** (+20% de ressources pour kubelet)
+- **110 pods** → density-factor **1.5** (+50% de ressources pour kubelet)
+
+💡 **Le script calcule automatiquement** le bon facteur avec `--target-pods` !
 
 ### Tableau de recommandations
 
