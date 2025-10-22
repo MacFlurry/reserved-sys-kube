@@ -463,11 +463,16 @@ Phase 4 : 100% (220 nœuds)  → Rollout complet
 
 ### Méthode 1 : Déploiement manuel (petit cluster)
 
+> 💡 **Pré-requis** : accès SSH sans mot de passe (clé) et paquets `bc`, `jq`, `yq >= 4` déjà installés
+> sur chaque nœud. Adaptez `SSH_USER`/`SSH_OPTS` à votre contexte (`root`, `vagrant`, `ec2-user`, etc.).
+
 ```bash
 #!/bin/bash
 # deploy-manual.sh
 
-NODES="node1 node2 node3 node4 node5"  # Liste de vos nœuds
+SSH_USER="root"
+SSH_OPTS=""  # Exemple : "-F ~/.ssh/config" ou "-o StrictHostKeyChecking=no"
+NODES="node1 node2"  # Liste de vos nœuds
 PROFILE="conservative"
 TARGET_PODS="110"
 
@@ -477,17 +482,17 @@ for node in $NODES; do
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     
     # Copier le script
-    scp kubelet_auto_config.sh root@$node:/tmp/
+    scp $SSH_OPTS kubelet_auto_config.sh ${SSH_USER}@$node:/tmp/
     
     # Exécuter
-    ssh root@$node "chmod +x /tmp/kubelet_auto_config.sh && \
+    ssh $SSH_OPTS ${SSH_USER}@$node "chmod +x /tmp/kubelet_auto_config.sh && \
                     /tmp/kubelet_auto_config.sh \
                     --profile $PROFILE \
                     --target-pods $TARGET_PODS \
                     --backup"
     
     # Vérifier le status
-    ssh root@$node "systemctl is-active kubelet"
+    ssh $SSH_OPTS ${SSH_USER}@$node "systemctl is-active kubelet"
     
     echo ""
     echo "✓ Nœud $node configuré"
@@ -504,6 +509,10 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 ```bash
 chmod +x deploy-manual.sh
 ./deploy-manual.sh
+
+> ℹ️ Sur des nœuds de faible capacité (≤ 2 vCPU / ≤ 2 GiB RAM), `--target-pods 110` peut être refusé
+> car l’allocatable tomberait sous les seuils de sécurité. Commencez par le profil `gke` ou réduisez
+> le `density-factor`.
 ```
 
 ---
@@ -631,6 +640,10 @@ ansible-playbook -i inventory.ini deploy-kubelet-config.yml
 
 # Application sur un groupe spécifique (phase progressive)
 ansible-playbook -i inventory.ini deploy-kubelet-config.yml --limit "node[1:22]"
+
+> ⚠️ Les `target-pods` élevés (`density-factor > 1.0`) imposent des minimums d’allocatable (25 % CPU / 20 %
+> RAM). Sur les petits nœuds de lab, le dry-run peut donc retourner un `ERROR` et la tâche ansible
+> échouera. Ajustez `profile` / `target_pods` en conséquence ou ne déployez pas sur ces machines.
 ```
 
 ---
@@ -638,6 +651,8 @@ ansible-playbook -i inventory.ini deploy-kubelet-config.yml --limit "node[1:22]"
 ### Méthode 3 : Déploiement via DaemonSet (avancé)
 
 ⚠️ **Attention** : Cette méthode nécessite des privilèges élevés (hostPath, privileged)
+> ⚠️ Elle n’est pas adaptée aux nœuds très contraints : si la configuration calculée laisse < 25 % CPU
+> ou < 20 % RAM disponibles, le conteneur DaemonSet retournera une erreur et restera en crashloop.
 
 **Fichier** : `kubelet-config-daemonset.yaml`
 
