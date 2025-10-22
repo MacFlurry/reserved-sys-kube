@@ -138,6 +138,8 @@ Si un test échoue :
 | `sudo ./kubelet_auto_config.sh --profile conservative --density-factor 1.5` (cp1) | ⚠️ | Density-factor plafonné à 1.0 sur control-plane (garde-fou) |
 | `sudo ./kubelet_auto_config.sh --profile conservative --density-factor 1.5` (w1) | ❌ | Refus : `Réservations mémoire totales (3276 Mi) >= Capacité mémoire (1945 Mi)` |
 | `sudo ./kubelet_auto_config.sh --profile gke --density-factor 4 --dry-run` (w1) | ❌ | Refus : `Allocatable mémoire tomberait à 18.00% (< 20%)` |
+| Script manuel (Méthode 1) via `scp/ssh vagrant` | ⚠️ | cp1 plafonne le facteur à 1.0 ; w1 refuse (mémoire insuffisante) |
+| `ssh node "sudo kubelet_auto_config.sh --profile gke --dry-run"` (Méthode 3) | ✅ | Exécution distante OK, dry-run sans effets |
 | Re-run `sudo ./kubelet_auto_config.sh` (cp1) | ✅ | Δ réel : CPU +855 m, RAM +1860 Mi |
 
 Tous les tests manuels se terminent avec `kubectl get nodes` → `cp1` & `w1` en `Ready`, et les backups `config.yaml.last-success.*` présents.
