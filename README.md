@@ -519,7 +519,9 @@ chmod +x deploy-manual.sh
 
 ### Méthode 2 : Déploiement via Ansible (recommandé)
 
-**Fichier** : `deploy-kubelet-config.yml`
+> ✅ **Validé sur lab Vagrant** : Cette méthode a été testée et validée (voir [ansible/README.md](ansible/README.md))
+
+**Fichier** : `ansible/deploy-kubelet-config.yml`
 
 ```yaml
 ---
@@ -645,6 +647,12 @@ ansible-playbook -i inventory.ini deploy-kubelet-config.yml --limit "node[1:22]"
 > RAM). Sur les petits nœuds de lab, le dry-run peut donc retourner un `ERROR` et la tâche ansible
 > échouera. Ajustez `profile` / `target_pods` en conséquence ou ne déployez pas sur ces machines.
 ```
+
+📖 **Documentation complète** : Voir **[ansible/README.md](ansible/README.md)** pour :
+- Configuration de l'inventory selon votre contexte (depuis poste de travail ou depuis un nœud)
+- Installation automatique de yq
+- Exemples de résultats attendus sur un lab validé
+- Guide de troubleshooting détaillé
 
 ---
 
