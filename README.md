@@ -1204,14 +1204,37 @@ sudo vi /var/lib/kubelet/config.yaml
 # line 42: bc: command not found
 ```
 
-**Solution** :
-```bash
-# Installer les dépendances manquantes
-sudo apt update && sudo apt install -y bc jq systemd
+**⚠️ Note** : Depuis la **v2.0.16**, le script installe **automatiquement** les dépendances manquantes (`bc`, `jq`, `yq v4`). Ce problème ne devrait plus se produire.
 
-# Vérifier
-which bc jq systemctl
-```
+**Si le problème persiste** :
+
+1. **Vérifier les permissions** : Le script a besoin de `sudo` pour installer les dépendances
+   ```bash
+   sudo ./kubelet_auto_config.sh
+   ```
+
+2. **Vérifier la connectivité Internet** : Le script télécharge `yq` depuis GitHub
+   ```bash
+   ping -c 3 github.com
+   ```
+
+3. **Installation manuelle** (si nécessaire) :
+   ```bash
+   sudo apt update && sudo apt install -y bc jq systemd
+
+   # Pour yq v4
+   ARCH=$(uname -m)
+   case "$ARCH" in
+     x86_64|amd64)   YQ_BIN=yq_linux_amd64 ;;
+     arm64|aarch64)  YQ_BIN=yq_linux_arm64 ;;
+   esac
+   sudo wget -qO /usr/local/bin/yq \
+     "https://github.com/mikefarah/yq/releases/download/v4.44.3/${YQ_BIN}"
+   sudo chmod +x /usr/local/bin/yq
+
+   # Vérifier
+   which bc jq yq systemctl
+   ```
 
 ### Problème 6 : Permission denied lors de l'exécution
 
@@ -1594,5 +1617,5 @@ SOFTWARE.
 ---
 
 **Dernière mise à jour** : 22 oct 2025
-**Version du projet** : 2.0.14 (script v2.0.13)
+**Version du projet** : 2.0.16 (script v2.0.13)
 **Mainteneur** : Platform Engineering Team
