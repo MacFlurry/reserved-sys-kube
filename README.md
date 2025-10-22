@@ -658,70 +658,80 @@ ansible-playbook -i inventory.ini deploy-kubelet-config.yml --limit "node[1:22]"
 
 ### Méthode 3 : Déploiement via DaemonSet (avancé)
 
-⚠️ **Attention** : Cette méthode nécessite des privilèges élevés (hostPath, privileged)
-> ⚠️ Elle n’est pas adaptée aux nœuds très contraints : si la configuration calculée laisse < 25 % CPU
-> ou < 20 % RAM disponibles, le conteneur DaemonSet retournera une erreur et restera en crashloop.
+> ✅ **Validé sur lab Vagrant** : Cette méthode a été testée avec succès (voir [daemonset/README.md](daemonset/README.md))
 
-**Fichier** : `kubelet-config-daemonset.yaml`
+⚠️ **Attention** : Cette méthode nécessite des privilèges élevés (`privileged: true`, `hostPath`)
+- À utiliser uniquement dans des environnements contrôlés
+- Validation sécurité requise avant usage en production
+- Non adaptée aux nœuds très contraints (< 25% CPU / < 20% RAM après config)
+
+**Script de déploiement** : `daemonset/generate-daemonset.sh`
+
+```bash
+#!/bin/bash
+# Déploiement automatique du DaemonSet
+
+cd daemonset
+
+# 1. Créer le ConfigMap avec le script
+kubectl create configmap kubelet-config-script \
+  --from-file=kubelet_auto_config.sh=../kubelet_auto_config.sh \
+  --namespace=kube-system \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+# 2. Déployer le DaemonSet
+kubectl apply -f kubelet-config-daemonset-only.yaml
+
+# 3. Vérifier les pods
+kubectl get pods -n kube-system -l app=kubelet-config-updater -o wide
+```
+
+**Surveillance** :
+
+```bash
+# Suivre les logs de tous les pods
+kubectl logs -n kube-system -l app=kubelet-config-updater -f
+
+# Logs d'un pod spécifique
+kubectl logs -n kube-system kubelet-config-updater-xxxxx
+
+# Si kubectl logs ne fonctionne pas, utiliser crictl sur le nœud
+ssh node1 "sudo crictl logs <container-id>"
+```
+
+**Vérification** :
+
+```bash
+# Vérifier l'allocatable après application
+kubectl get nodes -o custom-columns=\
+NAME:.metadata.name,\
+CPU-ALLOC:.status.allocatable.cpu,\
+MEM-ALLOC:.status.allocatable.memory
+```
+
+**Nettoyage** :
+
+```bash
+# Supprimer le DaemonSet après application
+kubectl delete daemonset -n kube-system kubelet-config-updater
+kubectl delete configmap -n kube-system kubelet-config-script
+```
+
+**Personnalisation** : Éditez `daemonset/kubelet-config-daemonset-only.yaml` pour modifier le profil ou target-pods :
 
 ```yaml
-apiVersion: apps/v1
-kind: DaemonSet
-metadata:
-  name: kubelet-config-updater
-  namespace: kube-system
-spec:
-  selector:
-    matchLabels:
-      app: kubelet-config-updater
-  template:
-    metadata:
-      labels:
-        app: kubelet-config-updater
-    spec:
-      hostNetwork: true
-      hostPID: true
-      priorityClassName: system-node-critical
-      tolerations:
-      - effect: NoSchedule
-        operator: Exists
-      containers:
-      - name: updater
-        image: ubuntu:22.04
-        command:
-        - /bin/bash
-        - -c
-        - |
-          # Installation des dépendances
-          apt update && apt install -y bc jq systemd
-          
-          # Copier le script depuis ConfigMap
-          cp /scripts/kubelet_auto_config.sh /tmp/
-          chmod +x /tmp/kubelet_auto_config.sh
-          
-          # Exécuter la configuration
-          chroot /host /tmp/kubelet_auto_config.sh \
-            --profile conservative \
-            --target-pods 110 \
-            --backup
-          
-          # Marquer comme terminé
-          echo "Configuration terminée sur $(hostname)"
-          sleep infinity
-        securityContext:
-          privileged: true
-        volumeMounts:
-        - name: host-root
-          mountPath: /host
-        - name: scripts
-          mountPath: /scripts
-      volumes:
-      - name: host-root
-        hostPath:
-          path: /
-      - name: scripts
-        configMap:
-          name: kubelet-config-script
+chroot /host /tmp/kubelet_auto_config.sh \
+  --profile gke \            # ou eks, conservative, minimal
+  --target-pods 80 \         # ajuster selon votre densité
+  --backup
+```
+
+📖 **Documentation complète** : Voir **[daemonset/README.md](daemonset/README.md)** pour :
+- Guide de déploiement détaillé (automatique et manuel)
+- Surveillance avec kubectl et crictl
+- Troubleshooting complet
+- Comparaison avec les Méthodes 1 & 2
+- Résultats de validation sur lab réel
 ---
 apiVersion: v1
 kind: ConfigMap
