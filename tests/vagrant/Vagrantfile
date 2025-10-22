@@ -1,0 +1,213 @@
+# Vagrantfile — Kubernetes (kubeadm + containerd + Calico) sur Ubuntu 24.04 ARM64
+# Provider: VMware Fusion (vagrant-vmware-desktop)
+# 1 control-plane (3 vCPU / 4GB) + 1 worker (2 vCPU / 2GB) — Pod CIDR Calico: 192.168.0.0/16
+
+VAGRANT_DEFAULT_PROVIDER = "vmware_desktop"
+
+BOX_NAME     = "local/ubuntu-24.04-arm64"
+K8S_VERSION  = "v1.32" # dépôt apt pkgs.k8s.io par minor
+POD_CIDR     = "192.168.0.0/16"
+CLUSTER_NAME = "k8s-lab"
+IP_BASE      = "192.168.56"
+
+NODES = [
+  { name: "cp1", ip_octet: 10, role: "control-plane" },
+  { name: "w1",  ip_octet: 11, role: "worker" },
+]
+
+CONTROL_PLANE   = NODES.find { |n| n[:role] == "control-plane" }
+CONTROL_PLANE_IP = "#{IP_BASE}.#{CONTROL_PLANE[:ip_octet]}" if CONTROL_PLANE
+raise "NODES must include a control-plane entry" unless CONTROL_PLANE_IP
+
+COMMON_PROVISION = <<-SHELL
+  set -euxo pipefail
+
+  # Attendre la fin de cloud-init pour éviter les courses avec SSH/réseau
+  command -v cloud-init >/dev/null 2>&1 && cloud-init status --wait || true
+
+  # 1) Pré-requis noyau + sysctl
+  cat >/etc/modules-load.d/k8s.conf <<'EOF'
+overlay
+br_netfilter
+EOF
+  modprobe overlay || true
+  modprobe br_netfilter || true
+
+  cat >/etc/sysctl.d/99-kubernetes-cri.conf <<'EOF'
+net.bridge.bridge-nf-call-iptables = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+net.ipv4.ip_forward = 1
+EOF
+  sysctl --system
+
+  # 2) Désactiver la SWAP
+  swapoff -a || true
+  sed -ri '/\\sswap\\s/s/^/#/' /etc/fstab || true
+
+  # 3) Containerd + SystemdCgroup
+  apt-get update
+  apt-get install -y --no-install-recommends containerd ca-certificates curl gpg apt-transport-https
+  mkdir -p /etc/containerd
+  if [ ! -s /etc/containerd/config.toml ]; then
+    containerd config default | tee /etc/containerd/config.toml >/dev/null
+  fi
+  sed -ri 's/^\\s*SystemdCgroup = .*/            SystemdCgroup = true/' /etc/containerd/config.toml
+  systemctl daemon-reload
+  systemctl enable containerd
+  systemctl restart containerd
+
+  # Attendre que containerd soit complètement démarré (important sur ARM)
+  sleep 10
+
+  # 4) Dépôt Kubernetes + kubelet/kubeadm/kubectl
+  install -m 0755 -d /etc/apt/keyrings
+  if [ ! -f /etc/apt/keyrings/kubernetes-apt-keyring.gpg ]; then
+    curl -fsSL https://pkgs.k8s.io/core:/stable:/#{K8S_VERSION}/deb/Release.key \
+      | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+    chmod a+r /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+  fi
+
+  cat >/etc/apt/sources.list.d/kubernetes.list <<EOF
+deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/#{K8S_VERSION}/deb/ /
+EOF
+
+  apt-get update
+  apt-get install -y kubelet kubeadm kubectl
+  apt-mark hold kubelet kubeadm kubectl
+
+  # 5) Kubelet: NE PAS démarrer (kubeadm init s'en chargera)
+  # systemctl enable kubelet est volontairement commenté
+SHELL
+
+MASTER_PROVISION = <<-SHELL
+  set -euxo pipefail
+
+  # S'assurer que containerd est prêt et stable
+  systemctl is-active --quiet containerd || systemctl restart containerd
+  sleep 10
+
+  # S'assurer que kubelet est arrêté avant kubeadm init (kubeadm le démarrera lui-même)
+  systemctl stop kubelet 2>/dev/null || true
+
+  # Initialisation control-plane
+  if [ ! -f /etc/kubernetes/admin.conf ]; then
+    echo "Initialisation du control plane..."
+    kubeadm init \
+      --pod-network-cidr=#{POD_CIDR} \
+      --apiserver-advertise-address=#{CONTROL_PLANE_IP} \
+      --control-plane-endpoint=#{CONTROL_PLANE_IP} \
+      --upload-certs
+
+    # Attendre que l'API server soit complètement démarré
+    echo "Attente de la stabilisation de l'API server..."
+    sleep 15
+  fi
+
+  # Kubeconfig pour vagrant
+  mkdir -p /home/vagrant/.kube
+  cp -f /etc/kubernetes/admin.conf /home/vagrant/.kube/config
+  chown -R vagrant:vagrant /home/vagrant/.kube
+
+  # Calico (CNI)
+  if ! kubectl --kubeconfig=/etc/kubernetes/admin.conf get ns calico-system >/dev/null 2>&1; then
+    curl -fsSL https://raw.githubusercontent.com/projectcalico/calico/v3.30.4/manifests/calico.yaml -o /tmp/calico.yaml
+    kubectl --kubeconfig=/etc/kubernetes/admin.conf apply -f /tmp/calico.yaml
+  fi
+
+  # Join command
+  JOIN_CMD=$(kubeadm token create --print-join-command)
+  echo "#!/usr/bin/env bash" > /vagrant/join.sh
+  echo "set -euxo pipefail" >> /vagrant/join.sh
+  echo "$JOIN_CMD" >> /vagrant/join.sh
+  chmod +x /vagrant/join.sh
+
+  # Garde-fou (non bloquant)
+  kubectl --kubeconfig=/etc/kubernetes/admin.conf wait --for=condition=Ready node --all --timeout=300s || true
+SHELL
+
+WORKER_PROVISION = <<-SHELL
+  set -euxo pipefail
+
+  # Attendre que le join script soit prêt
+  echo "Attente du fichier join.sh..."
+  for i in $(seq 1 60); do
+    test -f /vagrant/join.sh && break
+    sleep 5
+  done
+  test -f /vagrant/join.sh
+
+  # Attendre que le control plane soit complètement stable (important!)
+  echo "Attente de la stabilité du control plane..."
+  sleep 30
+
+  # Assainir un éventuel kubelet déjà démarré par systemd (reprovisionnements)
+  systemctl stop kubelet 2>/dev/null || true
+
+  # Vérifier que l'API server répond avant de joindre
+  for i in $(seq 1 30); do
+    curl -k https://#{CONTROL_PLANE_IP}:6443/healthz &>/dev/null && break
+    echo "Attente de l'API server... ($i/30)"
+    sleep 5
+  done
+
+  bash /vagrant/join.sh
+SHELL
+
+Vagrant.configure("2") do |config|
+  config.vm.box = BOX_NAME
+  config.vm.synced_folder ".", "/vagrant", disabled: false
+
+  # Évite la rotation de clé (réduit les échecs SSH pendant le provisioning)
+  config.ssh.insert_key = false
+  config.vm.boot_timeout = 600
+
+  NODES.each do |n|
+    config.vm.define n[:name], autostart: (n[:name] == "cp1") do |node|
+      node.vm.box = BOX_NAME
+      node.vm.hostname = "#{CLUSTER_NAME}-#{n[:name]}"
+      node.vm.network "private_network", ip: "#{IP_BASE}.#{n[:ip_octet]}"
+
+      node.vm.provider "vmware_desktop" do |v|
+        # Control plane : 3 vCPU / 4GB RAM, Workers : 2 vCPU / 2GB RAM
+        if n[:role] == "control-plane"
+          v.vmx["memsize"]  = "4096"
+          v.vmx["numvcpus"] = "3"
+        else
+          v.vmx["memsize"]  = "2048"
+          v.vmx["numvcpus"] = "2"
+        end
+        v.vmx["ethernet0.pcislotnumber"] = "160" # évite le warning + soucis réseau
+        v.gui = false
+      end
+
+      # Attendre cloud-init — run: once
+      node.vm.provision "shell", inline: "set -euxo pipefail; command -v cloud-init >/dev/null 2>&1 && cloud-init status --wait || true",
+                                   privileged: true, run: "once"
+
+      # Provision commun — run: once
+      node.vm.provision "shell", inline: COMMON_PROVISION, run: "once"
+
+      # Forcer le node-ip de CE nœud (crucial avec VMware Fusion multi-interfaces) — run: once
+      node.vm.provision "shell", run: "once", inline: <<-SHELL
+        set -euxo pipefail
+        NODE_IP="#{IP_BASE}.#{n[:ip_octet]}"
+
+        # Configuration kubelet avec node-ip via /etc/default/kubelet
+        # (comme attendu par le drop-in officiel /usr/lib/systemd/system/kubelet.service.d/10-kubeadm.conf)
+        cat >/etc/default/kubelet <<EOF
+KUBELET_EXTRA_ARGS=--node-ip=$NODE_IP
+EOF
+
+        systemctl daemon-reload
+      SHELL
+
+      if n[:role] == "control-plane"
+        # Init control-plane — run: once
+        node.vm.provision "shell", inline: MASTER_PROVISION, run: "once"
+      else
+        # Join worker — run: once (ne se relancera pas aux boots suivants)
+        node.vm.provision "shell", inline: WORKER_PROVISION, run: "once"
+      end
+    end
+  end
+end
