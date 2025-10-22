@@ -9,7 +9,7 @@ Ce répertoire contient les tests unitaires pour le script `kubelet_auto_config.
 ```
 tests/
 ├── README.md                 # Ce fichier
-└── test_calculations.sh      # Tests unitaires des fonctions calculate_*
+└── test_calculations.sh      # Tests unitaires des fonctions calculate_* et helpers
 ```
 
 ## Exécution des tests
@@ -20,6 +20,8 @@ tests/
 cd tests
 ./test_calculations.sh
 ```
+
+Sortie attendue : `38/38 tests` réussis (11 suites).
 
 ### Intégration CI/CD
 
@@ -56,6 +58,12 @@ test:
 ### 5. Test de robustesse
 - **Gestion des décimales** : Validation avec RAM=3.80 GiB (cas réel ARM64)
 
+### 6. Utilitaires & garde-fous
+- `format_diff`
+- `normalize_cpu_to_milli`
+- `normalize_memory_to_mib`
+- Vérification des constantes `MIN_ALLOC_CPU_PERCENT`, `MIN_ALLOC_MEM_PERCENT`, `CONTROL_PLANE_MAX_DENSITY`
+
 ## Métriques validées
 
 Pour chaque profil, les tests valident :
@@ -64,9 +72,14 @@ Pour chaque profil, les tests valident :
 - `kube-reserved.cpu` (en millicores)
 - `kube-reserved.memory` (en MiB)
 
+Les suites suplémentaires valident :
+- `format_diff` (mise en forme des deltas)
+- `normalize_*` (normalisation CPU/mémoire)
+- Les constantes de garde (`MIN_ALLOC_*`, `CONTROL_PLANE_MAX_DENSITY`)
+
 ## Critères de passage
 
-✅ **Tous les tests doivent passer** (25/25)
+✅ **Tous les tests doivent passer** (38/38)
 - Valeurs exactes pour les CPU (entiers)
 - Plages acceptables pour la mémoire (± 5 MiB)
 - Aucune valeur décimale dans les résultats
@@ -74,24 +87,11 @@ Pour chaque profil, les tests valident :
 
 ## Ajout de nouveaux tests
 
-Pour ajouter un test :
-
-```bash
-test_custom_scenario() {
-    echo "Test: Mon scénario personnalisé"
-
-    local vcpu=16
-    local ram_gib=64
-    local ram_mib=62464
-
-    read -r sys_cpu sys_mem kube_cpu kube_mem <<< $(calculate_gke "$vcpu" "$ram_gib" "$ram_mib")
-
-    assert_equals "Test CPU" "expected_value" "$sys_cpu"
-    assert_in_range "Test Memory" "$sys_mem" min max
-}
-```
-
-Puis appeler `test_custom_scenario` dans la fonction `main()`.
+1. Ajouter une fonction `test_mon_scenario()` :
+   - Utilisez les helpers `assert_equals`, `assert_in_range` ou créez vos propres vérifications.
+   - Si vous testez une nouvelle fonction utilitaire, pensez à l'ajouter dans `source_functions()`.
+2. Enregistrer la suite via `run_test_suite "Description" test_mon_scenario` dans `main()`.
+3. Mettre à jour cette documentation et, si besoin, le changelog.
 
 ## Debugging
 
@@ -113,3 +113,31 @@ Si un test échoue :
 - **Mise à jour des tests** : Si les formules de calcul changent, adapter les valeurs attendues
 - **Nouveaux profils** : Ajouter des tests pour chaque nouveau profil de calcul
 - **Régression** : Conserver les tests historiques pour détecter les régressions
+
+## Tests manuels (lab Vagrant ARM64)
+
+- **Hôte** : macOS (Apple Silicon) + Vagrant VMware Desktop
+- **VMs** :
+  - `cp1` (control-plane) — 3 vCPU / 3.8 GiB RAM
+  - `w1` (worker) — 2 vCPU / 1.9 GiB RAM
+- **Préparation** :
+  ```bash
+  vagrant destroy -f cp1 w1
+  vagrant up cp1
+  vagrant up w1
+  vagrant ssh cp1 -c 'sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_arm64 && sudo chmod +x /usr/local/bin/yq'
+  vagrant ssh w1  -c 'sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_arm64 && sudo chmod +x /usr/local/bin/yq'
+  ```
+
+### Campagnes exécutées
+
+| Commande | Résultat | Observations |
+|----------|----------|--------------|
+| `sudo ./kubelet_auto_config.sh` (cp1) | ✅ | Δ réel : CPU −220 m, RAM −609 Mi |
+| `sudo ./kubelet_auto_config.sh` (w1)  | ✅ | Δ réel : CPU −200 m, RAM −546 Mi |
+| `sudo ./kubelet_auto_config.sh --profile conservative --density-factor 1.5` (cp1) | ⚠️ | Density-factor ramené à 1.0, allocatable final CPU 1925 m / RAM 1330 Mi |
+| `sudo ./kubelet_auto_config.sh --profile conservative --density-factor 1.5` (w1) | ❌ | Refus : `Réservations mémoire totales (3276 Mi) >= Capacité mémoire (1945 Mi)` |
+| `sudo ./kubelet_auto_config.sh --profile gke --density-factor 4 --dry-run` (w1) | ❌ | Refus : `Allocatable mémoire tomberait à 18.00% (< 20%)` |
+| Re-run `sudo ./kubelet_auto_config.sh` (cp1) | ✅ | Δ réel : CPU +855 m, RAM +1860 Mi |
+
+Tous les tests manuels se terminent avec `kubectl get nodes` → `cp1` & `w1` en `Ready`, et les backups `config.yaml.last-success.*` présents.

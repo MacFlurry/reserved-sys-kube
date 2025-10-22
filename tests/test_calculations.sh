@@ -28,6 +28,9 @@ source_functions() {
     eval "$(sed -n '/^calculate_eks()/,/^}/p' "$script_path")"
     eval "$(sed -n '/^calculate_conservative()/,/^}/p' "$script_path")"
     eval "$(sed -n '/^calculate_minimal()/,/^}/p' "$script_path")"
+    eval "$(sed -n '/^format_diff()/,/^}/p' "$script_path")"
+    eval "$(sed -n '/^normalize_cpu_to_milli()/,/^}/p' "$script_path")"
+    eval "$(sed -n '/^normalize_memory_to_mib()/,/^}/p' "$script_path")"
 }
 
 assert_equals() {
@@ -236,6 +239,41 @@ test_decimal_handling() {
     fi
 }
 
+test_format_diff() {
+    assert_equals "format_diff positif" "+10" "$(format_diff 10)"
+    assert_equals "format_diff négatif" "-5" "$(format_diff -5)"
+    assert_equals "format_diff zéro" "0" "$(format_diff 0)"
+}
+
+test_normalize_cpu_to_milli() {
+    assert_equals "normalize_cpu_to_milli 1.5" "1500" "$(normalize_cpu_to_milli 1.5)"
+    assert_equals "normalize_cpu_to_milli 250m" "250" "$(normalize_cpu_to_milli 250m)"
+    assert_equals "normalize_cpu_to_milli chaîne invalide" "" "$(normalize_cpu_to_milli foo)"
+}
+
+test_normalize_memory_to_mib() {
+    assert_equals "normalize_memory_to_mib 512Mi" "512" "$(normalize_memory_to_mib 512Mi)"
+    assert_equals "normalize_memory_to_mib 4096Ki" "4" "$(normalize_memory_to_mib 4096Ki)"
+    assert_equals "normalize_memory_to_mib 2Gi" "2048" "$(normalize_memory_to_mib 2Gi)"
+    assert_equals "normalize_memory_to_mib invalide" "" "$(normalize_memory_to_mib nope)"
+}
+
+test_guard_constants() {
+    local script_path="../kubelet_auto_config.sh"
+
+    local cpu_min
+    cpu_min=$(awk -F'=' '/^MIN_ALLOC_CPU_PERCENT=/{gsub(/#.*/,"",$2); gsub(/ /,"",$2); print $2; exit}' "$script_path")
+    assert_equals "Constante MIN_ALLOC_CPU_PERCENT" "25" "$cpu_min"
+
+    local mem_min
+    mem_min=$(awk -F'=' '/^MIN_ALLOC_MEM_PERCENT=/{gsub(/#.*/,"",$2); gsub(/ /,"",$2); print $2; exit}' "$script_path")
+    assert_equals "Constante MIN_ALLOC_MEM_PERCENT" "20" "$mem_min"
+
+    local density_max
+    density_max=$(awk -F'=' '/^CONTROL_PLANE_MAX_DENSITY=/{gsub(/#.*/,"",$2); gsub(/ /,"",$2); print $2; exit}' "$script_path")
+    assert_equals "Constante CONTROL_PLANE_MAX_DENSITY" "1.0" "$density_max"
+}
+
 run_test_suite() {
     local suite_name=$1
     local test_function=$2
@@ -274,6 +312,10 @@ main() {
     echo "  [5] Conservative - Nœud moyen (8 vCPU, 32 GiB)"
     echo "  [6] Minimal - Nœud moyen (8 vCPU, 32 GiB)"
     echo "  [7] Gestion des décimales (3.80 GiB - ARM64)"
+    echo "  [8] format_diff"
+    echo "  [9] normalize_cpu_to_milli"
+    echo " [10] normalize_memory_to_mib"
+    echo " [11] Vérification des constantes de garde"
     echo ""
     echo "═══════════════════════════════════════════════════════════════"
 
@@ -288,6 +330,10 @@ main() {
     run_test_suite "Conservative - Nœud moyen (8 vCPU, 32 GiB)" test_conservative_calculations
     run_test_suite "Minimal - Nœud moyen (8 vCPU, 32 GiB)" test_minimal_calculations
     run_test_suite "Gestion des décimales (3.80 GiB - ARM64)" test_decimal_handling
+    run_test_suite "format_diff" test_format_diff
+    run_test_suite "normalize_cpu_to_milli" test_normalize_cpu_to_milli
+    run_test_suite "normalize_memory_to_mib" test_normalize_memory_to_mib
+    run_test_suite "Constantes de garde" test_guard_constants
 
     # Résumé
     echo ""
