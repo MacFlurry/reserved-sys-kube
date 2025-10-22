@@ -1493,7 +1493,8 @@ Ouvrez une issue sur GitHub avec :
 
 Pour l'historique complet des versions, consultez les fichiers de changelog dédiés :
 
-- **[CHANGELOG_v2.0.13.md](CHANGELOG_v2.0.13.md)** - Version actuelle (garde-fous allocatable & diff automatiques)
+- **[CHANGELOG_v2.0.14.md](CHANGELOG_v2.0.14.md)** - Version actuelle (validation complète des 3 méthodes de déploiement)
+- **[CHANGELOG_v2.0.13.md](CHANGELOG_v2.0.13.md)** - Garde-fous allocatable & diff automatiques
 - **[CHANGELOG_v2.0.12.md](CHANGELOG_v2.0.12.md)** - Réservations éphémères adaptatives & robustesse kubelet
 - **[CHANGELOG_v2.0.11.md](CHANGELOG_v2.0.11.md)** - Détection automatique control-plane/worker
 - **[CHANGELOG_v2.0.10.md](CHANGELOG_v2.0.10.md)** - Correctifs tests critiques
