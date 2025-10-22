@@ -237,7 +237,76 @@ acquire_lock() {
     log_info "Lock acquis (PID $$)"
 }
 
+install_dependencies() {
+    local missing_apt=()
+    local need_yq=false
+
+    # Vérifier bc et jq
+    for cmd in bc jq; do
+        if ! command -v "$cmd" &> /dev/null; then
+            missing_apt+=("$cmd")
+        fi
+    done
+
+    # Vérifier yq (et sa version)
+    if ! command -v yq &> /dev/null; then
+        need_yq=true
+    else
+        # Vérifier que c'est la bonne version (mikefarah v4+, pas Python v3)
+        if ! yq --version 2>&1 | grep -q "mikefarah"; then
+            log_warning "yq installé mais version incorrecte (Python v3 détectée)"
+            log_info "Remplacement par yq v4 (mikefarah)..."
+            need_yq=true
+        fi
+    fi
+
+    # Rien à faire si tout est OK
+    if [[ ${#missing_apt[@]} -eq 0 ]] && [[ "$need_yq" == "false" ]]; then
+        return 0
+    fi
+
+    # Installation automatique
+    log_info "Installation automatique des dépendances manquantes..."
+
+    # Installer bc et jq via apt
+    if [[ ${#missing_apt[@]} -gt 0 ]]; then
+        log_info "Installation de ${missing_apt[*]} via apt..."
+        apt-get update -qq >/dev/null 2>&1 || log_error "apt update échoué"
+        apt-get install -y -qq "${missing_apt[@]}" >/dev/null 2>&1 || log_error "Installation ${missing_apt[*]} échouée"
+        log_success "${missing_apt[*]} installé(s)"
+    fi
+
+    # Installer yq v4
+    if [[ "$need_yq" == "true" ]]; then
+        log_info "Installation de yq v4 depuis GitHub..."
+
+        # Détecter l'architecture
+        local arch
+        arch=$(uname -m)
+        local yq_binary
+        case "$arch" in
+            x86_64|amd64)   yq_binary="yq_linux_amd64" ;;
+            arm64|aarch64)  yq_binary="yq_linux_arm64" ;;
+            *) log_error "Architecture non supportée pour yq: $arch" ;;
+        esac
+
+        # Télécharger yq v4
+        local yq_version="v4.44.3"
+        local yq_url="https://github.com/mikefarah/yq/releases/download/${yq_version}/${yq_binary}"
+
+        wget -qO /tmp/yq "$yq_url" >/dev/null 2>&1 || log_error "Téléchargement yq échoué depuis $yq_url"
+        chmod +x /tmp/yq
+        mv /tmp/yq /usr/local/bin/yq || log_error "Installation yq échouée"
+
+        log_success "yq $yq_version installé"
+    fi
+}
+
 check_dependencies() {
+    # Installer automatiquement les dépendances manquantes
+    install_dependencies
+
+    # Vérifier que tout est bien installé
     local missing=()
     for cmd in bc jq systemctl yq; do
         if ! command -v "$cmd" &> /dev/null; then
@@ -246,7 +315,7 @@ check_dependencies() {
     done
 
     if [[ ${#missing[@]} -gt 0 ]]; then
-        log_error "Dépendances manquantes: ${missing[*]}. Installez-les avec: apt install bc jq systemd yq"
+        log_error "Dépendances manquantes après installation: ${missing[*]}"
     fi
 }
 
