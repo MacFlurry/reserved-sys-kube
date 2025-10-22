@@ -821,24 +821,20 @@ Le script v2.0.3+ conserve automatiquement **plusieurs niveaux de backups** pour
 ```bash
 # Le script conserve automatiquement les 4 dernières configurations réussies
 # Format : /var/lib/kubelet/config.yaml.last-success.{0,1,2,3}
-# .0 = plus récent, .3 = plus ancien
+# .0 = configuration actuelle, .1 = précédente, etc.
 
 # Lister les backups rotatifs disponibles
 ls -lht /var/lib/kubelet/config.yaml.last-success.*
 
-# Revenir à la dernière configuration (1 changement en arrière)
-sudo cp /var/lib/kubelet/config.yaml.last-success.0 /var/lib/kubelet/config.yaml
-sudo systemctl restart kubelet
-
-# Revenir 2 changements en arrière
+# Revenir à la dernière configuration stable (1 changement en arrière)
 sudo cp /var/lib/kubelet/config.yaml.last-success.1 /var/lib/kubelet/config.yaml
 sudo systemctl restart kubelet
 
-# Revenir 3 changements en arrière
+# Revenir 2 changements en arrière
 sudo cp /var/lib/kubelet/config.yaml.last-success.2 /var/lib/kubelet/config.yaml
 sudo systemctl restart kubelet
 
-# Revenir 4 changements en arrière (le plus ancien)
+# Revenir 3 changements en arrière (si disponible)
 sudo cp /var/lib/kubelet/config.yaml.last-success.3 /var/lib/kubelet/config.yaml
 sudo systemctl restart kubelet
 ```
@@ -865,37 +861,25 @@ sudo systemctl restart kubelet
 #### 3. Script de rollback automatique
 
 ```bash
-#!/bin/bash
-# rollback-kubelet-config.sh
+# Script fourni dans le dépôt : rollback-kubelet-config.sh
 
-echo "=== Rollback Configuration Kubelet ==="
-echo ""
+# Restaurer automatiquement la configuration précédente
+sudo ./rollback-kubelet-config.sh
 
-# Essayer d'abord les backups rotatifs
-ROTATIF=$(ls -t /var/lib/kubelet/config.yaml.last-success.* 2>/dev/null | head -1)
-if [[ -n "$ROTATIF" ]]; then
-    echo "Backup rotatif trouvé : $ROTATIF"
-    sudo cp "$ROTATIF" /var/lib/kubelet/config.yaml
-    sudo systemctl restart kubelet
-    echo "✓ Rollback terminé depuis backup rotatif"
-    sudo systemctl status kubelet
-    exit 0
-fi
+# Voir le backup sélectionné sans appliquer
+sudo ./rollback-kubelet-config.sh --dry-run
 
-# Sinon essayer les backups permanents
-PERMANENT=$(ls -t /var/lib/kubelet/config.yaml.backup.* 2>/dev/null | head -1)
-if [[ -n "$PERMANENT" ]]; then
-    echo "Backup permanent trouvé : $PERMANENT"
-    sudo cp "$PERMANENT" /var/lib/kubelet/config.yaml
-    sudo systemctl restart kubelet
-    echo "✓ Rollback terminé depuis backup permanent"
-    sudo systemctl status kubelet
-    exit 0
-fi
+# Restaurer un backup précis (.last-success.2)
+sudo ./rollback-kubelet-config.sh --index 2
 
-echo "✗ Aucun backup trouvé"
-exit 1
+# Restaurer sans redémarrer kubelet (à faire manuellement ensuite)
+sudo ./rollback-kubelet-config.sh --no-restart
 ```
+
+Le script :
+- ignore `.last-success.0` (configuration actuelle) et restaure par défaut `.1` ;
+- bascule automatiquement vers les backups permanents (`--backup`) si besoin ;
+- expose des options `--index`, `--dry-run`, `--no-restart`.
 
 #### 4. Configuration manuelle d'urgence
 
