@@ -200,3 +200,87 @@ localhost  : ok=1    changed=0    unreachable=0    failed=0
 - `ansible/inventory.ini` - Inventory pour exécution depuis un poste de travail
 
 **Conclusion** : ✅ La Méthode 2 (Ansible) est **entièrement fonctionnelle** et recommandée pour les déploiements sur clusters multi-nœuds.
+
+---
+
+### Validation Méthode 3 : Déploiement via DaemonSet
+
+**Date** : 22 octobre 2025
+**Contexte** : Validation du déploiement via DaemonSet Kubernetes
+
+**Configuration** :
+- DaemonSet déployé dans namespace `kube-system`
+- ConfigMap créé automatiquement depuis `kubelet_auto_config.sh`
+- Image de base : `ubuntu:24.04`
+- Privilèges : `privileged: true` + `hostPath` mount
+- Profil : `gke`
+- Target pods : 80 (density-factor auto-calculé : 1.20)
+
+**Déploiement** :
+```bash
+cd /home/vagrant/daemonset
+./generate-daemonset.sh
+```
+
+**Pods créés** :
+```
+NAME                           READY   STATUS    RESTARTS   AGE   NODE
+kubelet-config-updater-8dzj9   1/1     Running   0          2m    k8s-lab-cp1
+kubelet-config-updater-cphg2   1/1     Running   0          2m    k8s-lab-w1
+```
+
+**Résultats par nœud** :
+
+| Nœud | Type | CPU avant | CPU après | Δ CPU | RAM avant | RAM après | Δ RAM | Status |
+|------|------|-----------|-----------|-------|-----------|-----------|-------|--------|
+| k8s-lab-cp1 | control-plane | 2670m | 2736m | +66m | 2961 MiB | 3098 MiB | +137 MiB | ✅ |
+| k8s-lab-w1 | worker | 1700m | 1760m | +60m | 1109 MiB | 1228 MiB | +119 MiB | ✅ |
+
+**Allocatable final** :
+- `k8s-lab-cp1` : CPU `2736m/3000m` (91%), RAM `3098 MiB/3899 MiB` (79%)
+- `k8s-lab-w1` : CPU `1760m/2000m` (88%), RAM `1228 MiB/1953 MiB` (63%)
+
+**Observations** :
+
+1. **Installation automatique** :
+   - Dépendances (bc, jq, wget) installées dans le conteneur
+   - yq v4.44.3 (ARM64) téléchargé et copié sur l'hôte
+   - Script copié depuis ConfigMap vers `/tmp/` de l'hôte
+
+2. **Exécution via chroot** :
+   - Le script s'exécute dans le contexte de l'hôte via `chroot /host`
+   - Détection automatique du type de nœud (control-plane vs worker)
+   - Calcul adapté du density-factor pour 80 pods
+
+3. **Logs récupérés** :
+   - Sur cp1 : `kubectl logs` fonctionne normalement
+   - Sur w1 : `kubectl logs` échoue (pas d'InternalIP)
+     - Solution : `sudo crictl logs <container-id>` sur le nœud w1
+
+4. **Backups créés** :
+   - Backup permanent : `/var/lib/kubelet/config.yaml.backup.20251022_125910`
+   - Backups rotatifs : `.last-success.{0..2}` sur cp1, `.last-success.{0..1}` sur w1
+
+5. **Nettoyage** :
+   - DaemonSet et ConfigMap supprimés sans impact sur la configuration kubelet
+   - Configurations restent en place après nettoyage
+
+**Fichiers créés** :
+- `daemonset/README.md` - Documentation complète de la méthode DaemonSet
+- `daemonset/generate-daemonset.sh` - Script de déploiement automatique
+- `daemonset/kubelet-config-daemonset-only.yaml` - Définition du DaemonSet
+
+**Avantages constatés** :
+- ✅ Déploiement ultra-rapide (tous les nœuds en parallèle)
+- ✅ Pas de dépendance SSH/Ansible
+- ✅ Installation automatique de toutes les dépendances
+- ✅ Logs conservés dans les pods pour audit
+- ✅ Adapté pour automatisation CI/CD
+
+**Inconvénients constatés** :
+- ⚠️ Nécessite privilèges élevés (`privileged: true`)
+- ⚠️ Monte le système de fichiers hôte complet (risque sécurité)
+- ⚠️ `kubectl logs` peut échouer sur certains nœuds (nécessite crictl)
+- ⚠️ Pods restent actifs (sleep infinity) après exécution
+
+**Conclusion** : ✅ La Méthode 3 (DaemonSet) est **fonctionnelle** et **efficace** pour une automatisation avancée, mais nécessite une validation sécurité approfondie avant usage en production.
