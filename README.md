@@ -70,8 +70,26 @@ Le script nécessite les outils suivants :
 
 ```bash
 sudo apt update
-sudo apt install -y bc jq systemd yq
+sudo apt install -y bc jq
+
+# Installer yq (>= v4) - le paquet Ubuntu (v3) n'est pas compatible
+ARCH=$(uname -m)
+case "$ARCH" in
+  x86_64|amd64)   YQ_BIN=yq_linux_amd64 ;;
+  arm64|aarch64)  YQ_BIN=yq_linux_arm64 ;;
+  *) echo "Architecture non supportée: $ARCH" >&2; exit 1 ;;
+esac
+
+sudo wget -qO /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/v4.44.3/${YQ_BIN}"
+sudo chmod +x /usr/local/bin/yq
+
+# Vérifier la version
+yq --version
 ```
+
+> ℹ️ **Important** : le script requiert `yq` **v4+** (binaire mikefarah).  
+> Le paquet `apt install yq` installe la version Python 3.x qui provoque des erreurs `yq: -i/--in-place can only be used with -y/-Y`.  
+> Consultez les binaires officiels : https://github.com/mikefarah/yq/releases
 
 ### Permissions
 
