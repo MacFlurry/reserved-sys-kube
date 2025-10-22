@@ -1,7 +1,7 @@
 #!/bin/bash
 ################################################################################
 # Script de configuration automatique des réservations kubelet
-# Version: 2.0.10
+# Version: 2.0.12
 # Compatible: Kubernetes v1.32+, cgroups v1/v2, systemd, Ubuntu
 #
 # Voir CHANGELOG_v2.0.8.md pour l'historique des versions précédentes
@@ -31,7 +31,7 @@
 set -euo pipefail
 
 # Version
-VERSION="2.0.11"
+VERSION="2.0.12"
 
 # Couleurs pour l'output
 RED='\033[0;31m'
@@ -66,19 +66,19 @@ trap cleanup EXIT
 ################################################################################
 
 log_info() {
-    echo -e "${BLUE}[INFO]${NC} $*"
+    echo -e "${BLUE}[INFO]${NC} $*" >&2
 }
 
 log_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $*"
+    echo -e "${GREEN}[SUCCESS]${NC} $*" >&2
 }
 
 log_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $*"
+    echo -e "${YELLOW}[WARNING]${NC} $*" >&2
 }
 
 log_error() {
-    echo -e "${RED}[ERROR]${NC} $*"
+    echo -e "${RED}[ERROR]${NC} $*" >&2
     exit 1
 }
 
@@ -292,6 +292,110 @@ detect_ram_mib() {
     fi
 
     echo "$ram_mib"
+}
+
+detect_ephemeral_capacity_mib() {
+    local path="/var/lib/kubelet"
+
+    if [[ ! -d "$path" ]]; then
+        path="/"
+    fi
+
+    local df_output
+    if ! df_output=$(df -BM "$path" 2>/dev/null); then
+        log_warning "Impossible de détecter la capacité de stockage éphémère (df échoue sur $path)"
+        echo "0"
+        return
+    fi
+
+    local size_mb
+    size_mb=$(awk 'NR==2 {print $2}' <<< "$df_output" | tr -d 'M')
+
+    if [[ -z "$size_mb" ]]; then
+        log_warning "Capacité de stockage éphémère introuvable (df vide sur $path)"
+        echo "0"
+        return
+    fi
+
+    if ! [[ "$size_mb" =~ ^[0-9]+$ ]]; then
+        log_warning "Valeur de capacité éphémère invalide: $size_mb"
+        echo "0"
+        return
+    fi
+
+    echo "$size_mb"
+}
+
+calculate_ephemeral_reservations() {
+    local capacity_mib
+    capacity_mib=$(detect_ephemeral_capacity_mib)
+
+    local system_default_mib=10240  # 10Gi
+    local kube_default_mib=5120     # 5Gi
+
+    local system_ratio=30
+    local kube_ratio=20
+
+    local system_mib=$system_default_mib
+    local kube_mib=$kube_default_mib
+
+    if (( capacity_mib > 0 )); then
+        local system_cap=$(( capacity_mib * system_ratio / 100 ))
+        local kube_cap=$(( capacity_mib * kube_ratio / 100 ))
+
+        if (( system_cap <= 0 )); then
+            system_cap=capacity_mib
+        fi
+
+        if (( kube_cap <= 0 )); then
+            kube_cap=capacity_mib
+        fi
+
+        if (( system_cap > system_default_mib )); then
+            system_cap=$system_default_mib
+        fi
+
+        if (( kube_cap > kube_default_mib )); then
+            kube_cap=$kube_default_mib
+        fi
+
+        system_mib=$system_cap
+        kube_mib=$kube_cap
+
+        if (( system_mib < 256 )); then
+            system_mib=256
+        fi
+
+        if (( kube_mib < 128 )); then
+            kube_mib=128
+        fi
+
+        local total_reserved=$(( system_mib + kube_mib ))
+        local max_reserved=$(( capacity_mib * 80 / 100 ))
+
+        if (( max_reserved == 0 )); then
+            max_reserved=$capacity_mib
+        fi
+
+        if (( total_reserved > max_reserved )); then
+            if (( total_reserved > 0 )); then
+                system_mib=$(( system_mib * max_reserved / total_reserved ))
+                kube_mib=$(( kube_mib * max_reserved / total_reserved ))
+
+                if (( system_mib < 128 )); then
+                    system_mib=128
+                fi
+
+                if (( kube_mib < 64 )); then
+                    kube_mib=64
+                fi
+            fi
+        fi
+    else
+        log_warning "Capacité de stockage éphémère introuvable, utilisation des valeurs par défaut (10Gi / 5Gi)"
+    fi
+
+    echo "$system_mib $kube_mib"
 }
 
 ################################################################################
@@ -720,6 +824,10 @@ generate_kubelet_config_from_scratch() {
     local eviction_soft_mem=$9
     local node_type=${10}
 
+    local system_ephemeral_mib kube_ephemeral_mib
+    read -r system_ephemeral_mib kube_ephemeral_mib <<< "$(calculate_ephemeral_reservations)"
+    log_info "Réservations éphémères calculées: system=${system_ephemeral_mib}Mi, kube=${kube_ephemeral_mib}Mi"
+
     # Adapter enforceNodeAllocatable selon le type de nœud
     local enforce_list
     if [[ "$node_type" == "control-plane" ]]; then
@@ -745,12 +853,12 @@ kind: KubeletConfiguration
 systemReserved:
   cpu: "${sys_cpu}m"
   memory: "${sys_mem}Mi"
-  ephemeral-storage: "10Gi"
+  ephemeral-storage: "${system_ephemeral_mib}Mi"
 
 kubeReserved:
   cpu: "${kube_cpu}m"
   memory: "${kube_mem}Mi"
-  ephemeral-storage: "5Gi"
+  ephemeral-storage: "${kube_ephemeral_mib}Mi"
 
 # ============================================================
 # ENFORCEMENT DES RÉSERVATIONS
@@ -823,6 +931,10 @@ generate_kubelet_config() {
     # Calcul des seuils d'éviction
     read -r eviction_hard_mem eviction_soft_mem <<< $(calculate_eviction_thresholds "$ram_gib" "$ram_mib")
 
+    local system_ephemeral_mib kube_ephemeral_mib
+    read -r system_ephemeral_mib kube_ephemeral_mib <<< "$(calculate_ephemeral_reservations)"
+    log_info "Réservations éphémères calculées: system=${system_ephemeral_mib}Mi, kube=${kube_ephemeral_mib}Mi"
+
     # Si le fichier de config kubelet existe, merger avec l'existant
     if [[ -f "$KUBELET_CONFIG" ]]; then
         log_info "Fusion avec la configuration existante (préservation des tweaks personnalisés)..."
@@ -843,12 +955,12 @@ $header_comment
         # systemReserved
         yq eval -i ".systemReserved.cpu = \"${sys_cpu}m\"" "$output_file"
         yq eval -i ".systemReserved.memory = \"${sys_mem}Mi\"" "$output_file"
-        yq eval -i ".systemReserved.\"ephemeral-storage\" = \"10Gi\"" "$output_file"
+        yq eval -i ".systemReserved.\"ephemeral-storage\" = \"${system_ephemeral_mib}Mi\"" "$output_file"
 
         # kubeReserved
         yq eval -i ".kubeReserved.cpu = \"${kube_cpu}m\"" "$output_file"
         yq eval -i ".kubeReserved.memory = \"${kube_mem}Mi\"" "$output_file"
-        yq eval -i ".kubeReserved.\"ephemeral-storage\" = \"5Gi\"" "$output_file"
+        yq eval -i ".kubeReserved.\"ephemeral-storage\" = \"${kube_ephemeral_mib}Mi\"" "$output_file"
 
         # enforceNodeAllocatable (adapter selon le type de nœud)
         if [[ "$node_type" == "control-plane" ]]; then
@@ -1219,10 +1331,24 @@ main() {
     log_success "Kubelet redémarré avec succès"
 
     # Vérification de la stabilité
-    log_info "Vérification de la stabilité du kubelet (15s)..."
-    sleep 15
+    log_info "Vérification de la stabilité du kubelet (jusqu'à 60s)..."
+    local wait_interval=5
+    local max_wait=60
+    local elapsed=0
+    local kubelet_active=false
 
-    if systemctl is-active --quiet kubelet; then
+    while (( elapsed < max_wait )); do
+        if systemctl is-active --quiet kubelet; then
+            kubelet_active=true
+            break
+        fi
+
+        ((elapsed += wait_interval))
+        log_info "  → Kubelet encore en démarrage (${elapsed}s/${max_wait}s)..."
+        sleep "$wait_interval"
+    done
+
+    if [[ "$kubelet_active" == true ]]; then
         log_success "✓ Kubelet actif et opérationnel"
 
         # Validation de l'attachement effectif du kubelet à kubelet.slice
@@ -1270,7 +1396,7 @@ main() {
             local history_count=0
             for i in $(seq 0 $((max_rotation - 1))); do
                 if [[ -f "/var/lib/kubelet/config.yaml.last-success.$i" ]]; then
-                    ((history_count++))
+                    history_count=$((history_count + 1))
                 fi
             done
             log_info "  → $history_count backup(s) rotatif(s) disponibles : .last-success.{0..$((history_count - 1))}"
@@ -1284,7 +1410,7 @@ main() {
             fi
         fi
     else
-        log_warning "✗ Kubelet non actif après redémarrage!"
+        log_warning "✗ Kubelet non actif après ${max_wait}s !"
 
         # Rollback automatique
         if [[ -n "$BACKUP_FILE" ]] && [[ -f "$BACKUP_FILE" ]]; then

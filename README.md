@@ -1456,29 +1456,29 @@ Ouvrez une issue sur GitHub avec :
 
 Pour l'historique complet des versions, consultez les fichiers de changelog dédiés :
 
-- **[CHANGELOG_v2.0.11.md](CHANGELOG_v2.0.11.md)** - Version actuelle (détection auto control-plane/worker)
+- **[CHANGELOG_v2.0.12.md](CHANGELOG_v2.0.12.md)** - Version actuelle (réservations éphémères adaptatives & robustesse kubelet)
+- **[CHANGELOG_v2.0.11.md](CHANGELOG_v2.0.11.md)** - Détection automatique control-plane/worker
 - **[CHANGELOG_v2.0.10.md](CHANGELOG_v2.0.10.md)** - Correctifs tests critiques
 - **[CHANGELOG_v2.0.9.md](CHANGELOG_v2.0.9.md)** - Amélioration UX suite de tests
 - **[CHANGELOG_v2.0.8.md](CHANGELOG_v2.0.8.md)** - Correctifs critiques ARM64
 - Versions précédentes : voir le dossier `changelogs/` (si créé)
 
-### Version Actuelle : v2.0.11
+### Version Actuelle : v2.0.12
 
 **Nouveautés :**
-- ✅ Détection automatique du type de nœud (control-plane vs worker)
-- ✅ Adaptation intelligente de `enforceNodeAllocatable` selon le type
+- ✅ Réservations `ephemeral-storage` dynamiques selon la capacité réelle du nœud
+- ✅ Boucle de vérification kubelet prolongée (jusqu'à 60 s) avant rollback
+- ✅ Journaux clean sur `stderr` pour éviter les `sed`/`yq` corrompus en sous-shell
+- ✅ Rotation des backups compatible `set -e` (pas d'arrêt prématuré)
+
+**Hérité des versions précédentes :**
+- ✅ Détection automatique control-plane vs worker avec enforcement adapté
 - ✅ Option `--node-type` pour override manuel
-- ✅ Prévention des crashes de kube-apiserver sur control-planes
-- ✅ Rétrocompatible : comportement par défaut optimal pour tous les nœuds
+- ✅ Support ARM64 & lock file robuste
+- ✅ Formatage YAML propre + suite de tests unitaires
+- ✅ Compatible `set -euo pipefail`
 
-**Hérité de v2.0.10 :**
-- ✅ Support ARM64 (arithmétique décimale)
-- ✅ Lock file robuste
-- ✅ Formatage YAML propre
-- ✅ Suite de tests unitaires (25 tests)
-- ✅ Tests compatibles `set -euo pipefail`
-
-Voir [CHANGELOG_v2.0.11.md](CHANGELOG_v2.0.11.md) pour les détails complets.
+Voir [CHANGELOG_v2.0.12.md](CHANGELOG_v2.0.12.md) pour les détails complets.
 
 ---
 ## 📄 Licence
@@ -1546,6 +1546,6 @@ SOFTWARE.
 
 ---
 
-**Dernière mise à jour** : 21 oct 2025
-**Version du script** : 2.0.11
+**Dernière mise à jour** : 22 oct 2025
+**Version du script** : 2.0.12
 **Mainteneur** : Platform Engineering Team
