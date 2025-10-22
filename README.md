@@ -1474,16 +1474,20 @@ Ouvrez une issue sur GitHub avec :
 
 Pour l'historique complet des versions, consultez les fichiers de changelog dédiés :
 
-- **[CHANGELOG_v2.0.12.md](CHANGELOG_v2.0.12.md)** - Version actuelle (réservations éphémères adaptatives & robustesse kubelet)
+- **[CHANGELOG_v2.0.13.md](CHANGELOG_v2.0.13.md)** - Version actuelle (garde-fous allocatable & diff automatiques)
+- **[CHANGELOG_v2.0.12.md](CHANGELOG_v2.0.12.md)** - Réservations éphémères adaptatives & robustesse kubelet
 - **[CHANGELOG_v2.0.11.md](CHANGELOG_v2.0.11.md)** - Détection automatique control-plane/worker
 - **[CHANGELOG_v2.0.10.md](CHANGELOG_v2.0.10.md)** - Correctifs tests critiques
 - **[CHANGELOG_v2.0.9.md](CHANGELOG_v2.0.9.md)** - Amélioration UX suite de tests
 - **[CHANGELOG_v2.0.8.md](CHANGELOG_v2.0.8.md)** - Correctifs critiques ARM64
 - Versions précédentes : voir le dossier `changelogs/` (si créé)
 
-### Version Actuelle : v2.0.12
+### Version Actuelle : v2.0.13
 
 **Nouveautés :**
+- ✅ Garde-fous : density-factor plafonné sur les control-planes et arrêt si l'allocatable < 25% CPU / 20% RAM (30%/25% sur control-plane)
+- ✅ Affichage de la variation estimée (et réelle) d'allocatable après exécution
+- ✅ Pré-validation avant application : le script refuse les profils qui satureraient la mémoire
 - ✅ Réservations `ephemeral-storage` dynamiques selon la capacité réelle du nœud
 - ✅ Boucle de vérification kubelet prolongée (jusqu'à 60 s) avant rollback
 - ✅ Journaux clean sur `stderr` pour éviter les `sed`/`yq` corrompus en sous-shell
@@ -1565,5 +1569,5 @@ SOFTWARE.
 ---
 
 **Dernière mise à jour** : 22 oct 2025
-**Version du script** : 2.0.12
+**Version du script** : 2.0.13
 **Mainteneur** : Platform Engineering Team

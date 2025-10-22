@@ -1,7 +1,7 @@
 #!/bin/bash
 ################################################################################
 # Script de configuration automatique des réservations kubelet
-# Version: 2.0.12
+# Version: 2.0.13
 # Compatible: Kubernetes v1.32+, cgroups v1/v2, systemd, Ubuntu
 #
 # Voir CHANGELOG_v2.0.8.md pour l'historique des versions précédentes
@@ -31,7 +31,7 @@
 set -euo pipefail
 
 # Version
-VERSION="2.0.12"
+VERSION="2.0.13"
 
 # Couleurs pour l'output
 RED='\033[0;31m'
@@ -50,6 +50,11 @@ DRY_RUN=false
 BACKUP=false
 KUBELET_CONFIG="/var/lib/kubelet/config.yaml"
 LOCK_FILE="/var/lock/kubelet-auto-config.lock"
+
+# Seuils et garde-fous
+MIN_ALLOC_CPU_PERCENT=25         # Pourcentage minimum de CPU allocatable autorisé
+MIN_ALLOC_MEM_PERCENT=20         # Pourcentage minimum de mémoire allocatable autorisé
+CONTROL_PLANE_MAX_DENSITY=1.0    # Density-factor maximum autorisé sur un control-plane
 
 # Fonction de nettoyage pour le trap
 cleanup() {
@@ -80,6 +85,103 @@ log_warning() {
 log_error() {
     echo -e "${RED}[ERROR]${NC} $*" >&2
     exit 1
+}
+
+format_diff() {
+    local value=$1
+    if (( value > 0 )); then
+        echo "+${value}"
+    else
+        echo "${value}"
+    fi
+}
+
+normalize_cpu_to_milli() {
+    local value=$1
+
+    if [[ -z "$value" ]]; then
+        echo ""
+        return
+    fi
+
+    if [[ "$value" =~ m$ ]]; then
+        echo "${value%m}"
+        return
+    fi
+
+    if [[ "$value" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+        # Convert cores to milli-cores (arrondi à l'entier le plus proche)
+        printf "%.0f" "$(echo "$value * 1000" | bc -l)"
+        return
+    fi
+
+    echo ""
+}
+
+normalize_memory_to_mib() {
+    local value=$1
+
+    if [[ -z "$value" ]]; then
+        echo ""
+        return
+    fi
+
+    if [[ "$value" =~ Ki$ ]]; then
+        local ki=${value%Ki}
+        if [[ "$ki" =~ ^[0-9]+$ ]]; then
+            echo $(( (ki + 512) / 1024 ))
+            return
+        fi
+    elif [[ "$value" =~ Mi$ ]]; then
+        local mi=${value%Mi}
+        if [[ "$mi" =~ ^[0-9]+$ ]]; then
+            echo "$mi"
+            return
+        fi
+    elif [[ "$value" =~ Gi$ ]]; then
+        local gi=${value%Gi}
+        if [[ "$gi" =~ ^[0-9]+$ ]]; then
+            echo $(( gi * 1024 ))
+            return
+        fi
+    fi
+
+    echo ""
+}
+
+get_current_allocatable_snapshot() {
+    if ! command -v kubectl >/dev/null 2>&1; then
+        echo ""
+        return
+    fi
+
+    local kubeconfig=""
+    if [[ -f /etc/kubernetes/kubelet.conf ]]; then
+        kubeconfig="--kubeconfig=/etc/kubernetes/kubelet.conf"
+    fi
+
+    local node_name
+    node_name=$(hostname)
+
+    local raw
+    if ! raw=$(kubectl $kubeconfig get node "$node_name" -o jsonpath='{.status.allocatable.cpu},{.status.allocatable.memory}' 2>/dev/null); then
+        echo ""
+        return
+    fi
+
+    local cpu_value=${raw%%,*}
+    local mem_value=${raw##*,}
+    local cpu_milli
+    cpu_milli=$(normalize_cpu_to_milli "$cpu_value")
+    local mem_mib
+    mem_mib=$(normalize_memory_to_mib "$mem_value")
+
+    if [[ -z "$cpu_milli" ]] || [[ -z "$mem_mib" ]]; then
+        echo ""
+        return
+    fi
+
+    echo "${cpu_milli}:${mem_mib}"
 }
 
 usage() {
@@ -1146,6 +1248,14 @@ main() {
     acquire_lock
     check_dependencies
 
+    local pre_alloc_snapshot
+    pre_alloc_snapshot=$(get_current_allocatable_snapshot || true)
+    if [[ -n "$pre_alloc_snapshot" ]]; then
+        local pre_cpu_m=${pre_alloc_snapshot%%:*}
+        local pre_mem_mi=${pre_alloc_snapshot##*:}
+        log_info "Allocatable actuel -> CPU: ${pre_cpu_m}m | Mémoire: ${pre_mem_mi}Mi"
+    fi
+
     # Validation des entrées
     validate_profile "$PROFILE"
     validate_node_type "$NODE_TYPE"
@@ -1165,6 +1275,13 @@ main() {
     else
         NODE_TYPE_DETECTED="$NODE_TYPE"
         log_info "Type de nœud forcé manuellement: $NODE_TYPE_DETECTED"
+    fi
+
+    if [[ "$NODE_TYPE_DETECTED" == "control-plane" ]]; then
+        if (( $(echo "$DENSITY_FACTOR > $CONTROL_PLANE_MAX_DENSITY" | bc -l) )); then
+            log_warning "Density-factor $DENSITY_FACTOR trop élevé pour un control-plane. Limite appliquée: $CONTROL_PLANE_MAX_DENSITY"
+            DENSITY_FACTOR=$CONTROL_PLANE_MAX_DENSITY
+        fi
     fi
 
     # Calcul automatique du density-factor si target-pods spécifié
@@ -1233,16 +1350,50 @@ main() {
         log_error "Réservations mémoire totales ($total_mem_reserved Mi) >= Capacité mémoire ($total_mem_capacity Mi)! Réduisez le density-factor."
     fi
 
-    # Avertissement si l'allocatable est trop faible (<10%)
-    local cpu_alloc_percent=$(echo "scale=2; (($total_cpu_capacity - $total_cpu_reserved) / $total_cpu_capacity) * 100" | bc)
-    local mem_alloc_percent=$(echo "scale=2; (($total_mem_capacity - $total_mem_reserved) / $total_mem_capacity) * 100" | bc)
+    # Calcul des allocatable estimés et des pourcentages restants
+    local alloc_cpu_milli=$((total_cpu_capacity - total_cpu_reserved))
+    local alloc_mem_mib=$((total_mem_capacity - total_mem_reserved))
+    local cpu_alloc_percent=$(echo "scale=2; ($alloc_cpu_milli / $total_cpu_capacity) * 100" | bc)
+    local mem_alloc_percent=$(echo "scale=2; ($alloc_mem_mib / $total_mem_capacity) * 100" | bc)
 
+    # Afficher la variation estimée par rapport à l'état initial (si récupérable)
+    if [[ -n "$pre_alloc_snapshot" ]]; then
+        local pre_cpu_m=${pre_alloc_snapshot%%:*}
+        local pre_mem_mi=${pre_alloc_snapshot##*:}
+        local cpu_diff=$((alloc_cpu_milli - pre_cpu_m))
+        local mem_diff=$((alloc_mem_mib - pre_mem_mi))
+        local cpu_diff_fmt
+        local mem_diff_fmt
+        cpu_diff_fmt=$(format_diff "$cpu_diff")
+        mem_diff_fmt=$(format_diff "$mem_diff")
+        log_info "Allocatable estimé -> CPU: ${alloc_cpu_milli}m (${cpu_diff_fmt}m) | Mémoire: ${alloc_mem_mib}Mi (${mem_diff_fmt}Mi)"
+    else
+        log_info "Allocatable estimé -> CPU: ${alloc_cpu_milli}m | Mémoire: ${alloc_mem_mib}Mi"
+    fi
+
+    # Avertissements préventifs
     if (( $(echo "$cpu_alloc_percent < 10" | bc -l) )); then
         log_warning "Allocatable CPU très faible: ${cpu_alloc_percent}% (< 10% de la capacité)"
     fi
 
     if (( $(echo "$mem_alloc_percent < 10" | bc -l) )); then
         log_warning "Allocatable mémoire très faible: ${mem_alloc_percent}% (< 10% de la capacité)"
+    fi
+
+    # Garde-fous stricts
+    local min_cpu_percent=$MIN_ALLOC_CPU_PERCENT
+    local min_mem_percent=$MIN_ALLOC_MEM_PERCENT
+    if [[ "$NODE_TYPE_DETECTED" == "control-plane" ]]; then
+        min_cpu_percent=$((min_cpu_percent + 5))
+        min_mem_percent=$((min_mem_percent + 5))
+    fi
+
+    if (( $(echo "$cpu_alloc_percent < $min_cpu_percent" | bc -l) )); then
+        log_error "Allocatable CPU tomberait à ${cpu_alloc_percent}% (< ${min_cpu_percent}%). Réduisez le density-factor ou choisissez un profil plus léger."
+    fi
+
+    if (( $(echo "$mem_alloc_percent < $min_mem_percent" | bc -l) )); then
+        log_error "Allocatable mémoire tomberait à ${mem_alloc_percent}% (< ${min_mem_percent}%). Réduisez le density-factor ou choisissez un profil plus léger."
     fi
 
     # Affichage du résumé
@@ -1353,6 +1504,23 @@ main() {
 
         # Validation de l'attachement effectif du kubelet à kubelet.slice
         validate_kubelet_slice_attachment
+
+        # Récupération de l'allocatable réel après application (si possible)
+        local post_alloc_snapshot
+        post_alloc_snapshot=$(get_current_allocatable_snapshot || true)
+        if [[ -n "$pre_alloc_snapshot" ]] && [[ -n "$post_alloc_snapshot" ]]; then
+            local pre_cpu_m=${pre_alloc_snapshot%%:*}
+            local pre_mem_mi=${pre_alloc_snapshot##*:}
+            local post_cpu_m=${post_alloc_snapshot%%:*}
+            local post_mem_mi=${post_alloc_snapshot##*:}
+            local cpu_diff=$((post_cpu_m - pre_cpu_m))
+            local mem_diff=$((post_mem_mi - pre_mem_mi))
+            local cpu_diff_fmt
+            local mem_diff_fmt
+            cpu_diff_fmt=$(format_diff "$cpu_diff")
+            mem_diff_fmt=$(format_diff "$mem_diff")
+            log_info "Δ allocatable réel -> CPU: ${post_cpu_m}m (${cpu_diff_fmt}m) | Mémoire: ${post_mem_mi}Mi (${mem_diff_fmt}Mi)"
+        fi
 
         # Gestion intelligente du backup avec rotation
         if [[ -n "$BACKUP_FILE" ]] && [[ -f "$BACKUP_FILE" ]]; then
