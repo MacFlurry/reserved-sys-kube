@@ -33,6 +33,7 @@ Objectif : permettre aux équipes d’**inspecter précisément l’impact de `k
   - Panneaux CPU/RAM allocatable + détail system/kube/éviction
   - Visualisation en pourcentage (stack) + MiB
   - Panneaux spécifiques aux réserves (Mi) et allocatable (GiB)
+- `rollback-kubelet-config.sh` : nouveau script CLI pour restaurer automatiquement la configuration kubelet depuis les backups (`--dry-run`, `--index`, `--no-restart`).
 
 ### 🧪 Lab Vagrant (`tests/vagrant/`)
 
