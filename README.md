@@ -66,8 +66,21 @@ Ce script applique les **formules officielles** documentées par Google (GKE), A
 
 ### Dépendances
 
-Le script nécessite les outils suivants :
+**✨ Installation automatique** : Le script installe automatiquement les dépendances manquantes (bc, jq, yq v4) au premier lancement. Aucune action préalable requise !
 
+Le script nécessite les outils suivants :
+- `bc` : Calculs arithmétiques
+- `jq` : Traitement JSON
+- `yq` v4+ (mikefarah) : Traitement YAML
+
+**Installation automatique** :
+```bash
+# Les dépendances sont installées automatiquement lors de l'exécution
+sudo ./kubelet_auto_config.sh --dry-run
+# Le script détecte et installe bc, jq, et yq v4 si nécessaire
+```
+
+**Installation manuelle** (optionnelle) :
 ```bash
 sudo apt update
 sudo apt install -y bc jq
@@ -87,8 +100,9 @@ sudo chmod +x /usr/local/bin/yq
 yq --version
 ```
 
-> ℹ️ **Important** : le script requiert `yq` **v4+** (binaire mikefarah).  
-> Le paquet `apt install yq` installe la version Python 3.x qui provoque des erreurs `yq: -i/--in-place can only be used with -y/-Y`.  
+> ℹ️ **Important** : le script installe automatiquement `yq` **v4+** (binaire mikefarah).
+> Si `yq` Python v3 est déjà installé, le script le remplace automatiquement par la bonne version.
+> Le paquet `apt install yq` installe la version Python 3.x qui provoque des erreurs `yq: -i/--in-place can only be used with -y/-Y`.
 > Consultez les binaires officiels : https://github.com/mikefarah/yq/releases
 
 ### Permissions
