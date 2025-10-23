@@ -1310,115 +1310,195 @@ ansible all -i inventory.ini -m shell -a \
 
 ## 📊 Monitoring et métriques
 
-### Dashboards Grafana recommandés
+### Lab de monitoring complet
 
-#### Dashboard 1 : Vue d'ensemble des réservations
+Un environnement de monitoring complet (Prometheus + Grafana + Alerting) est disponible dans **`tests/kubelet-alerting-lab/`**.
 
-**Métriques Prometheus** :
-```promql
-# Allocatable CPU par nœud
-kube_node_status_allocatable{resource="cpu",unit="core"}
+**Contenu du lab** :
+- 🎯 Dashboard Grafana prêt à l'emploi (JSON)
+- 📈 Recording rules Prometheus (métriques custom)
+- 🚨 Alerting rules (5 alertes recommandées)
+- 📖 Guide de déploiement complet avec kube-prometheus-stack
 
-# Allocatable Memory par nœud
-kube_node_status_allocatable{resource="memory",unit="byte"} / 1024 / 1024 / 1024
-
-# Capacity vs Allocatable (ratio de réservation)
-(kube_node_status_capacity{resource="cpu"} - kube_node_status_allocatable{resource="cpu"}) 
-/ kube_node_status_capacity{resource="cpu"} * 100
+**Déploiement rapide** :
+```bash
+cd tests/kubelet-alerting-lab
+# Suivre le README.md pour déployer sur votre cluster
 ```
 
-#### Dashboard 2 : Santé kubelet
+**Ce qui est déployé** :
+- Helm chart `kube-prometheus-stack` (Prometheus + Grafana + Alertmanager)
+- Metrics Server (métriques CPU/Memory des nœuds)
+- PrometheusRules (recording + alerting)
+- Dashboard Grafana avec visualisation temps réel
 
-```promql
-# PLEG latency (doit être < 5s)
-histogram_quantile(0.99, 
-  rate(kubelet_pleg_relist_duration_seconds_bucket[5m]))
+---
 
-# Throttling CPU kubelet
-rate(container_cpu_cfs_throttled_seconds_total{
-  container="kubelet"
-}[5m]) * 100
+### Recording rules Prometheus
 
-# Mémoire RSS kubelet
-process_resident_memory_bytes{job="kubelet"} / 1024 / 1024
+**Fichier** : `tests/kubelet-alerting-lab/kubelet-reservations-recordings.yaml`
+
+⚠️ **Prérequis** : Nécessite **kube-prometheus-stack** ou **Prometheus Operator** (PrometheusRule CRD)
+
+Ces recording rules créent des **métriques custom** basées sur vos réservations kubelet :
+
+```yaml
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: kubelet-reservations-recordings
+  namespace: monitoring
+spec:
+  groups:
+    - name: kubelet-reservations
+      rules:
+        # Métriques CPU réservées (en cores)
+        - record: kubelet_system_reserved_cpu_cores
+        - record: kubelet_kube_reserved_cpu_cores
+
+        # Métriques mémoire réservées (en bytes)
+        - record: kubelet_system_reserved_memory_bytes
+        - record: kubelet_kube_reserved_memory_bytes
+        - record: kubelet_memory_eviction_bytes
+
+        # Métriques en pourcentage de la capacité
+        - record: kubelet_system_reserved_cpu_percent
+        - record: kubelet_kube_reserved_cpu_percent
+        - record: kubelet_system_reserved_memory_percent
+        - record: kubelet_kube_reserved_memory_percent
+        - record: kubelet_memory_eviction_percent
 ```
 
-#### Dashboard 3 : Évictions
+📝 **Important** : Les valeurs dans le fichier YAML sont des exemples. Adaptez-les selon votre configuration réelle (voir le README du lab pour générer automatiquement les bonnes valeurs).
 
-```promql
-# Nombre d'évictions par raison
-sum by (reason) (kube_pod_status_reason{reason=~"Evicted|OutOf.*"})
-
-# Taux d'évictions
-rate(kube_pod_status_reason{reason="Evicted"}[5m]) * 60
+**Déploiement** :
+```bash
+kubectl apply -f tests/kubelet-alerting-lab/kubelet-reservations-recordings.yaml
 ```
+
+---
+
+### Dashboard Grafana
+
+**Fichier** : `tests/kubelet-alerting-lab/grafana-dashboard-kubelet-reservations.json`
+
+Le dashboard affiche en temps réel les métriques de réservations kubelet :
+
+**Panneaux inclus** :
+- CPU system-reserved et kube-reserved (en cores)
+- Mémoire system-reserved, kube-reserved et éviction (en Mi)
+- Allocatable CPU et mémoire (capacité disponible pour les pods)
+- Pourcentages de réservations par rapport à la capacité
+- Graphiques empilés pour visualiser la répartition
+
+**Import du dashboard** :
+1. Accéder à Grafana → **Dashboards** → **Import**
+2. Copier-coller le contenu du fichier JSON
+3. Sélectionner la datasource **Prometheus**
+4. Cliquer sur **Import**
+
+Le dashboard utilise les métriques créées par les recording rules ci-dessus.
+
+---
 
 ### Alertes recommandées
 
-**Fichier** : `kubelet-reservations-alerts.yaml`
+**Fichier** : `tests/kubelet-alerting-lab/kubelet-reservations-alerts.yaml`
+
+⚠️ **Prérequis** : Nécessite **kube-prometheus-stack** ou **Prometheus Operator** (PrometheusRule CRD)
+
+**Déploiement** :
+```bash
+kubectl apply -f tests/kubelet-alerting-lab/kubelet-reservations-alerts.yaml
+```
+
+**5 alertes implémentées** :
+
+| Alerte | Condition | Durée | Sévérité | Action recommandée |
+|--------|-----------|-------|----------|-------------------|
+| **KubeletHighCPUThrottling** | Throttling CPU > 10% | 10 min | Warning | Augmenter kube-reserved CPU |
+| **KubeletPLEGHighLatency** | PLEG P99 > 5s | 5 min | Warning | Augmenter kube-reserved ou réduire densité pods |
+| **KubeletHighMemoryUsage** | RSS kubelet > 4 GiB | 10 min | Warning | Augmenter kube-reserved memory |
+| **FrequentPodEvictions** | > 5 évictions/min | 5 min | Critical | Vérifier system-reserved et kube-reserved |
+| **NodeLowAllocatable** | Allocatable < 80% capacity | 30 min | Warning | Réservations potentiellement trop élevées |
+
+**Détails des alertes** :
 
 ```yaml
-groups:
-- name: kubelet-reservations
-  interval: 30s
-  rules:
-  
-  # Alerte : Kubelet CPU throttling élevé
-  - alert: KubeletHighCPUThrottling
-    expr: |
-      rate(container_cpu_cfs_throttled_seconds_total{container="kubelet"}[5m]) > 0.1
-    for: 10m
-    labels:
-      severity: warning
-    annotations:
-      summary: "Kubelet throttling CPU élevé sur {{ $labels.node }}"
-      description: "Le kubelet sur {{ $labels.node }} subit un throttling CPU de {{ $value | humanizePercentage }}. Augmentez kube-reserved CPU."
-  
-  # Alerte : PLEG latency trop élevée
-  - alert: KubeletPLEGHighLatency
-    expr: |
-      histogram_quantile(0.99, 
-        rate(kubelet_pleg_relist_duration_seconds_bucket[5m])) > 5
-    for: 5m
-    labels:
-      severity: warning
-    annotations:
-      summary: "PLEG latency élevée sur {{ $labels.node }}"
-      description: "P99 PLEG latency = {{ $value }}s (seuil: 5s). Considérez augmenter kube-reserved ou réduire la densité de pods."
-  
-  # Alerte : Mémoire kubelet élevée
-  - alert: KubeletHighMemoryUsage
-    expr: |
-      process_resident_memory_bytes{job="kubelet"} / 1024 / 1024 / 1024 > 4
-    for: 10m
-    labels:
-      severity: warning
-    annotations:
-      summary: "Consommation mémoire kubelet élevée sur {{ $labels.instance }}"
-      description: "Kubelet utilise {{ $value | humanize }}GiB de RAM. Augmentez kube-reserved memory."
-  
-  # Alerte : Évictions fréquentes
-  - alert: FrequentPodEvictions
-    expr: |
-      rate(kube_pod_status_reason{reason="Evicted"}[15m]) * 60 > 5
-    for: 5m
-    labels:
-      severity: critical
-    annotations:
-      summary: "Évictions fréquentes détectées"
-      description: "{{ $value | humanize }} évictions/min. Vérifiez les réservations system-reserved et kube-reserved."
-  
-  # Alerte : Allocatable très faible
-  - alert: NodeLowAllocatable
-    expr: |
-      (kube_node_status_allocatable{resource="cpu"} / 
-       kube_node_status_capacity{resource="cpu"}) < 0.8
-    for: 30m
-    labels:
-      severity: warning
-    annotations:
-      summary: "Allocatable CPU faible sur {{ $labels.node }}"
-      description: "Seulement {{ $value | humanizePercentage }} de CPU allocatable. Réservations potentiellement trop élevées."
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: kubelet-reservations
+  namespace: monitoring
+spec:
+  groups:
+    - name: kubelet-reservations
+      interval: 30s
+      rules:
+
+        # Alerte : Kubelet CPU throttling élevé
+        - alert: KubeletHighCPUThrottling
+          expr: |
+            rate(container_cpu_cfs_throttled_seconds_total{container="kubelet"}[5m]) > 0.1
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Kubelet throttling CPU élevé sur {{ $labels.node }}"
+            description: "Le kubelet sur {{ $labels.node }} subit un throttling CPU de {{ $value | humanizePercentage }}. Augmentez kube-reserved CPU."
+
+        # Alerte : PLEG latency trop élevée
+        - alert: KubeletPLEGHighLatency
+          expr: |
+            histogram_quantile(0.99, rate(kubelet_pleg_relist_duration_seconds_bucket[5m])) > 5
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "PLEG latency élevée sur {{ $labels.node }}"
+            description: "P99 PLEG latency = {{ $value }}s (seuil: 5s). Considérez augmenter kube-reserved ou réduire la densité de pods."
+
+        # Alerte : Mémoire kubelet élevée
+        - alert: KubeletHighMemoryUsage
+          expr: |
+            process_resident_memory_bytes{job="kubelet"} / 1024 / 1024 / 1024 > 4
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Consommation mémoire kubelet élevée sur {{ $labels.instance }}"
+            description: "Kubelet utilise {{ $value | humanize }}GiB de RAM. Augmentez kube-reserved memory."
+
+        # Alerte : Évictions fréquentes
+        - alert: FrequentPodEvictions
+          expr: |
+            rate(kube_pod_status_reason{reason="Evicted"}[15m]) * 60 > 5
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Évictions fréquentes détectées"
+            description: "{{ $value | humanize }} évictions/min. Vérifiez les réservations system-reserved et kube-reserved."
+
+        # Alerte : Allocatable très faible
+        - alert: NodeLowAllocatable
+          expr: |
+            (kube_node_status_allocatable{resource="cpu"} / kube_node_status_capacity{resource="cpu"}) < 0.8
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Allocatable CPU faible sur {{ $labels.node }}"
+            description: "Seulement {{ $value | humanizePercentage }} de CPU allocatable. Réservations potentiellement trop élevées."
+```
+
+**Vérification des alertes** :
+```bash
+# Vérifier que les PrometheusRules sont chargées
+kubectl get prometheusrule -n monitoring
+
+# Vérifier les alertes actives dans Prometheus
+# Accéder à Prometheus UI → Alerts
 ```
 
 ---
