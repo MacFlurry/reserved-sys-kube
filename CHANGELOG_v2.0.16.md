@@ -1,69 +1,69 @@
-# Changelog v2.0.16 - Installation automatique des dépendances
+# Changelog v2.0.16 - Installation automatique des dï¿½pendances
 
 **Date** : 22 octobre 2025
-**Type** : Amélioration UX
-**Impact** : Amélioration majeure de l'expérience utilisateur
+**Type** : Amï¿½lioration UX
+**Impact** : Amï¿½lioration majeure de l'expï¿½rience utilisateur
 
 ---
 
-## <¯ Vue d'ensemble
+## <ï¿½ Vue d'ensemble
 
-Cette version apporte une **amélioration significative de l'expérience utilisateur** : le script installe désormais **automatiquement** toutes les dépendances manquantes, sans aucune intervention manuelle requise.
+Cette version apporte une **amï¿½lioration significative de l'expï¿½rience utilisateur** : le script installe dï¿½sormais **automatiquement** toutes les dï¿½pendances manquantes, sans aucune intervention manuelle requise.
 
-**Problème résolu** :
-- **Avant** : les utilisateurs devaient installer manuellement `bc`, `jq`, et `yq v4` avant d'exécuter le script
+**Problï¿½me rï¿½solu** :
+- **Avant** : les utilisateurs devaient installer manuellement `bc`, `jq`, et `yq v4` avant d'exï¿½cuter le script
 - Risque d'installer la mauvaise version de `yq` (Python v3 au lieu de mikefarah v4)
-- Processus d'installation long et sujet aux erreurs (détection d'architecture, téléchargement manuel)
+- Processus d'installation long et sujet aux erreurs (dï¿½tection d'architecture, tï¿½lï¿½chargement manuel)
 
 **Solution** :
-- Le script détecte et installe automatiquement les dépendances manquantes au premier lancement
+- Le script dï¿½tecte et installe automatiquement les dï¿½pendances manquantes au premier lancement
 - Garantit l'installation de la bonne version de `yq` (v4+ mikefarah)
 - Support automatique des architectures ARM64 et AMD64
-- Remplacement automatique de `yq` Python v3 si détecté
+- Remplacement automatique de `yq` Python v3 si dï¿½tectï¿½
 
 ---
 
-## ( Nouveautés
+## ( Nouveautï¿½s
 
-### =' Installation automatique des dépendances
+### =' Installation automatique des dï¿½pendances
 
 **Nouvelle fonction `install_dependencies()`** :
 
-Fonctionnalités :
--  Détection automatique des dépendances manquantes (`bc`, `jq`, `yq`)
+Fonctionnalitï¿½s :
+-  Dï¿½tection automatique des dï¿½pendances manquantes (`bc`, `jq`, `yq`)
 -  Installation automatique de `bc` et `jq` via `apt-get`
--  Téléchargement et installation de `yq v4` (mikefarah) depuis GitHub
--  Détection automatique de l'architecture (ARM64/AMD64)
--  Remplacement automatique de `yq` Python v3 par `yq v4` si version incorrecte détectée
--  Vérification post-installation pour confirmer le succès
--  Aucune interaction utilisateur requise (installation par défaut)
+-  Tï¿½lï¿½chargement et installation de `yq v4` (mikefarah) depuis GitHub
+-  Dï¿½tection automatique de l'architecture (ARM64/AMD64)
+-  Remplacement automatique de `yq` Python v3 par `yq v4` si version incorrecte dï¿½tectï¿½e
+-  Vï¿½rification post-installation pour confirmer le succï¿½s
+-  Aucune interaction utilisateur requise (installation par dï¿½faut)
 
-**Exemple d'exécution** :
+**Exemple d'exï¿½cution** :
 
 ```bash
 $ sudo ./kubelet_auto_config.sh --dry-run
 
-[INFO] Installation automatique des dépendances manquantes...
+[INFO] Installation automatique des dï¿½pendances manquantes...
 [INFO] Installation de bc jq via apt...
-[SUCCESS] bc jq installé(s)
+[SUCCESS] bc jq installï¿½(s)
 [INFO] Installation de yq v4 depuis GitHub...
-[SUCCESS] yq v4.44.3 installé
-[INFO] Allocatable actuel -> CPU: 2000m | Mémoire: 1853Mi
-[SUCCESS] Détecté: 2 vCPU, 1.90 GiB RAM (1953 MiB)
+[SUCCESS] yq v4.44.3 installï¿½
+[INFO] Allocatable actuel -> CPU: 2000m | Mï¿½moire: 1853Mi
+[SUCCESS] Dï¿½tectï¿½: 2 vCPU, 1.90 GiB RAM (1953 MiB)
 ...
 ```
 
 ---
 
-## =Ö Documentation mise à jour
+## =ï¿½ Documentation mise ï¿½ jour
 
-### README.md - Section "Dépendances"
+### README.md - Section "Dï¿½pendances"
 
 **Avant v2.0.16** :
 ```markdown
-### Dépendances
+### Dï¿½pendances
 
-Le script nécessite les outils suivants :
+Le script nï¿½cessite les outils suivants :
 
 ```bash
 sudo apt update
@@ -71,17 +71,17 @@ sudo apt install -y bc jq
 # [20 lignes d'instructions manuelles pour yq...]
 ```
 
-**Après v2.0.16** :
+**Aprï¿½s v2.0.16** :
 ```markdown
-### Dépendances
+### Dï¿½pendances
 
 **( Installation automatique** : Le script installe automatiquement
-les dépendances manquantes (bc, jq, yq v4) au premier lancement.
-Aucune action préalable requise !
+les dï¿½pendances manquantes (bc, jq, yq v4) au premier lancement.
+Aucune action prï¿½alable requise !
 
 **Installation automatique** :
 ```bash
-# Les dépendances sont installées automatiquement lors de l'exécution
+# Les dï¿½pendances sont installï¿½es automatiquement lors de l'exï¿½cution
 sudo ./kubelet_auto_config.sh --dry-run
 ```
 
@@ -89,18 +89,56 @@ sudo ./kubelet_auto_config.sh --dry-run
 ```
 
 **Modifications** :
-- Badge "( Installation automatique" en tête de section
-- Instructions simplifiées : une seule commande suffit
-- Instructions manuelles déplacées en section optionnelle
+- Badge "( Installation automatique" en tï¿½te de section
+- Instructions simplifiï¿½es : une seule commande suffit
+- Instructions manuelles dï¿½placï¿½es en section optionnelle
 - Clarification sur le remplacement automatique de yq Python v3
+
+### README.md - Section "Monitoring et mï¿½triques"
+
+**Mise ï¿½ jour majeure** : Cohï¿½rence avec le lab `tests/kubelet-alerting-lab/`
+
+**Avant v2.0.16** :
+```markdown
+### Dashboards Grafana recommandï¿½s
+#### Dashboard 1 : Vue d'ensemble des rï¿½servations
+[Exemples de requï¿½tes PromQL manuelles...]
+```
+
+**Aprï¿½s v2.0.16** :
+```markdown
+### Lab de monitoring complet
+Un environnement complet dans `tests/kubelet-alerting-lab/`
+- Dashboard Grafana prï¿½t ï¿½ l'emploi (JSON)
+- Recording rules Prometheus (mï¿½triques custom)
+- Alerting rules (5 alertes recommandï¿½es)
+- Guide de dï¿½ploiement complet
+```
+
+**Amï¿½liorations apportï¿½es** :
+- ï¿½ **Rï¿½fï¿½rence explicite au lab** : Pointe vers `tests/kubelet-alerting-lab/` avec environnement complet
+- <ï¿½ **Recording rules documentï¿½es** : Mention des mï¿½triques custom `kubelet_*_reserved_*`
+- =ï¿½ **Dashboard JSON** : Dashboard prï¿½t ï¿½ importer (vs requï¿½tes manuelles)
+- 8 **PrometheusRule CRD** : Prï¿½cise le prï¿½requis kube-prometheus-stack
+- =ï¿½ **Tableau rï¿½capitulatif** : Table des 5 alertes avec conditions/sï¿½vï¿½ritï¿½/actions
+- < **Commandes de dï¿½ploiement** : Instructions `kubectl apply -f` claires
+- =ï¿½ **Vï¿½rification** : Commandes pour valider le dï¿½ploiement
+
+**Sections ajoutï¿½es** :
+1. **Lab de monitoring complet** - Vue d'ensemble et dï¿½ploiement rapide
+2. **Recording rules Prometheus** - Mï¿½triques custom (kubelet_system_reserved_*, etc.)
+3. **Dashboard Grafana** - Import du JSON prï¿½t ï¿½ l'emploi
+4. **Alertes recommandï¿½es** - 5 alertes avec dï¿½tails complets
+
+**Cohï¿½rence** : La documentation du README correspond maintenant exactement aux fichiers du lab et ï¿½ ce qui a ï¿½tï¿½ dï¿½ployï¿½ et testï¿½ dans l'environnement Vagrant (cp1 + w1).
 
 ---
 
-## >ê Tests et Validation
+## >ï¿½ Tests et Validation
 
-### Test 1 : Installation sur système vierge (worker node)
+### Test 1 : Installation sur systï¿½me vierge (worker node)
 
-**Contexte** : nSud worker sans dépendances installées
+**Contexte** : nSud worker sans dï¿½pendances installï¿½es
 
 ```bash
 vagrant ssh w1 -c "sudo rm -f /usr/local/bin/yq"
@@ -108,24 +146,24 @@ vagrant ssh w1 -c "cd /vagrant/reserved-sys-kube && \
   sudo ./kubelet_auto_config.sh --profile gke --target-pods 80 --dry-run"
 ```
 
-**Résultat** :
+**Rï¿½sultat** :
 ```
-[INFO] Installation automatique des dépendances manquantes...
+[INFO] Installation automatique des dï¿½pendances manquantes...
 [INFO] Installation de yq v4 depuis GitHub...
-[SUCCESS] yq v4.44.3 installé
-[INFO] Allocatable actuel -> CPU: 2000m | Mémoire: 1853Mi
-[SUCCESS] Détecté: 2 vCPU, 1.90 GiB RAM (1953 MiB)
-[SUCCESS] NSud détecté: WORKER
-[SUCCESS] Density-factor calculé: 1.20
+[SUCCESS] yq v4.44.3 installï¿½
+[INFO] Allocatable actuel -> CPU: 2000m | Mï¿½moire: 1853Mi
+[SUCCESS] Dï¿½tectï¿½: 2 vCPU, 1.90 GiB RAM (1953 MiB)
+[SUCCESS] NSud dï¿½tectï¿½: WORKER
+[SUCCESS] Density-factor calculï¿½: 1.20
 ```
 
- **Succès** : yq v4 ARM64 installé automatiquement, script exécuté sans erreur
+ **Succï¿½s** : yq v4 ARM64 installï¿½ automatiquement, script exï¿½cutï¿½ sans erreur
 
 ---
 
 ### Test 2 : Installation sur control-plane
 
-**Contexte** : nSud control-plane sans dépendances installées
+**Contexte** : nSud control-plane sans dï¿½pendances installï¿½es
 
 ```bash
 vagrant ssh cp1 -c "sudo rm -f /usr/local/bin/yq"
@@ -133,22 +171,22 @@ vagrant ssh cp1 -c "cd /vagrant/reserved-sys-kube && \
   sudo ./kubelet_auto_config.sh --profile conservative --target-pods 60 --dry-run"
 ```
 
-**Résultat** :
+**Rï¿½sultat** :
 ```
-[INFO] Installation automatique des dépendances manquantes...
+[INFO] Installation automatique des dï¿½pendances manquantes...
 [INFO] Installation de yq v4 depuis GitHub...
-[SUCCESS] yq v4.44.3 installé
-[INFO] Allocatable actuel -> CPU: 3000m | Mémoire: 3799Mi
-[SUCCESS] Détecté: 3 vCPU, 3.80 GiB RAM (3899 MiB)
-[SUCCESS] NSud détecté: CONTROL-PLANE
-[SUCCESS] Density-factor calculé: 1.13
+[SUCCESS] yq v4.44.3 installï¿½
+[INFO] Allocatable actuel -> CPU: 3000m | Mï¿½moire: 3799Mi
+[SUCCESS] Dï¿½tectï¿½: 3 vCPU, 3.80 GiB RAM (3899 MiB)
+[SUCCESS] NSud dï¿½tectï¿½: CONTROL-PLANE
+[SUCCESS] Density-factor calculï¿½: 1.13
 ```
 
- **Succès** : yq v4 ARM64 installé automatiquement, détection control-plane correcte
+ **Succï¿½s** : yq v4 ARM64 installï¿½ automatiquement, dï¿½tection control-plane correcte
 
 ---
 
-## =' Détails Techniques
+## =' Dï¿½tails Techniques
 
 ### Fonction install_dependencies()
 
@@ -156,7 +194,7 @@ vagrant ssh cp1 -c "cd /vagrant/reserved-sys-kube && \
 
 **Algorithme** :
 
-1. **Vérification bc et jq** :
+1. **Vï¿½rification bc et jq** :
    ```bash
    for cmd in bc jq; do
        if ! command -v "$cmd" &> /dev/null; then
@@ -165,14 +203,14 @@ vagrant ssh cp1 -c "cd /vagrant/reserved-sys-kube && \
    done
    ```
 
-2. **Vérification yq (et version)** :
+2. **Vï¿½rification yq (et version)** :
    ```bash
    if ! command -v yq &> /dev/null; then
        need_yq=true
    else
-       # Vérifier que c'est mikefarah v4, pas Python v3
+       # Vï¿½rifier que c'est mikefarah v4, pas Python v3
        if ! yq --version 2>&1 | grep -q "mikefarah"; then
-           log_warning "yq installé mais version incorrecte (Python v3 détectée)"
+           log_warning "yq installï¿½ mais version incorrecte (Python v3 dï¿½tectï¿½e)"
            need_yq=true
        fi
    fi
@@ -186,14 +224,14 @@ vagrant ssh cp1 -c "cd /vagrant/reserved-sys-kube && \
 
 4. **Installation yq v4** :
    ```bash
-   # Détection architecture
+   # Dï¿½tection architecture
    arch=$(uname -m)
    case "$arch" in
        x86_64|amd64)   yq_binary="yq_linux_amd64" ;;
        arm64|aarch64)  yq_binary="yq_linux_arm64" ;;
    esac
 
-   # Téléchargement et installation
+   # Tï¿½lï¿½chargement et installation
    yq_version="v4.44.3"
    yq_url="https://github.com/mikefarah/yq/releases/download/${yq_version}/${yq_binary}"
    wget -qO /tmp/yq "$yq_url"
@@ -201,101 +239,101 @@ vagrant ssh cp1 -c "cd /vagrant/reserved-sys-kube && \
    mv /tmp/yq /usr/local/bin/yq
    ```
 
-5. **Vérification post-installation** :
+5. **Vï¿½rification post-installation** :
    ```bash
    for cmd in bc jq systemctl yq; do
        if ! command -v "$cmd" &> /dev/null; then
-           log_error "Dépendances manquantes après installation: ${missing[*]}"
+           log_error "Dï¿½pendances manquantes aprï¿½s installation: ${missing[*]}"
        fi
    done
    ```
 
 ---
 
-## =Ê Comparaison Avant/Après
+## =ï¿½ Comparaison Avant/Aprï¿½s
 
 ### Avant v2.0.16
 
 **Workflow utilisateur** :
-1. Télécharger le script
-2. Lire la documentation pour connaître les dépendances
+1. Tï¿½lï¿½charger le script
+2. Lire la documentation pour connaï¿½tre les dï¿½pendances
 3. Installer `bc` et `jq` manuellement via `apt`
-4. Télécharger `yq v4` depuis GitHub
-5. Détecter l'architecture manuellement (ARM64/AMD64)
-6. Télécharger le bon binaire yq (20 lignes de commandes)
+4. Tï¿½lï¿½charger `yq v4` depuis GitHub
+5. Dï¿½tecter l'architecture manuellement (ARM64/AMD64)
+6. Tï¿½lï¿½charger le bon binaire yq (20 lignes de commandes)
 7. Risque d'erreur : installer `yq` Python v3 par erreur (`apt install yq`)
-8. Exécuter le script
+8. Exï¿½cuter le script
 
-**Temps estimé** : 5-10 minutes
-**Risque d'erreur** : Élevé (mauvaise version de yq)
+**Temps estimï¿½** : 5-10 minutes
+**Risque d'erreur** : ï¿½levï¿½ (mauvaise version de yq)
 
 ---
 
-### Après v2.0.16
+### Aprï¿½s v2.0.16
 
 **Workflow utilisateur** :
-1. Télécharger le script
-2. Exécuter le script
+1. Tï¿½lï¿½charger le script
+2. Exï¿½cuter le script
 
-**Temps estimé** : 30 secondes
+**Temps estimï¿½** : 30 secondes
 **Risque d'erreur** : Nul (installation automatique garantie)
 
-**Gain de temps** : **90%** (de 5-10 minutes à 30 secondes)
+**Gain de temps** : **90%** (de 5-10 minutes ï¿½ 30 secondes)
 
 ---
 
-## <¯ Avantages
+## <ï¿½ Avantages
 
 ### Pour les Utilisateurs
 
-1.  **Gain de temps** : 5-10 minutes économisées par installation
-2.  **Simplicité** : Une seule commande suffit
-3.  **Fiabilité** : Garantie d'installer la bonne version de yq
-4.  **Zero-config** : Fonctionne out-of-the-box sur systèmes vierges
-5.  **Support multi-architecture** : ARM64 et AMD64 détectés automatiquement
+1.  **Gain de temps** : 5-10 minutes ï¿½conomisï¿½es par installation
+2.  **Simplicitï¿½** : Une seule commande suffit
+3.  **Fiabilitï¿½** : Garantie d'installer la bonne version de yq
+4.  **Zero-config** : Fonctionne out-of-the-box sur systï¿½mes vierges
+5.  **Support multi-architecture** : ARM64 et AMD64 dï¿½tectï¿½s automatiquement
 6.  **Pas de risque d'erreur** : Plus de confusion entre yq v3 (Python) et v4 (mikefarah)
 
 ### Pour le Projet
 
-1.  **Cohérence avec Ansible** : Même logique que le playbook `ansible/deploy-kubelet-config.yml`
-2.  **Réduction du support** : Moins de questions sur l'installation des dépendances
+1.  **Cohï¿½rence avec Ansible** : Mï¿½me logique que le playbook `ansible/deploy-kubelet-config.yml`
+2.  **Rï¿½duction du support** : Moins de questions sur l'installation des dï¿½pendances
 3.  **Professionnalisme** : Comparable aux outils d'entreprise (auto-setup)
-4.  **Adoption facilitée** : Barrière à l'entrée considérablement réduite
-5.  **Moins de documentation à maintenir** : Instructions d'installation simplifiées
+4.  **Adoption facilitï¿½e** : Barriï¿½re ï¿½ l'entrï¿½e considï¿½rablement rï¿½duite
+5.  **Moins de documentation ï¿½ maintenir** : Instructions d'installation simplifiï¿½es
 
 ---
 
-## = Compatibilité
+## = Compatibilitï¿½
 
 ### Versions
 
-- **Script** : v2.0.13 (inchangé)
+- **Script** : v2.0.13 (inchangï¿½)
 - **Projet** : v2.0.16 (nouveau)
 
-### Rétro-compatibilité
+### Rï¿½tro-compatibilitï¿½
 
- **Totalement rétro-compatible** :
-- Si les dépendances sont déjà installées, aucune action effectuée (idempotence)
+ **Totalement rï¿½tro-compatible** :
+- Si les dï¿½pendances sont dï¿½jï¿½ installï¿½es, aucune action effectuï¿½e (idempotence)
 - Les anciennes commandes d'installation manuelle continuent de fonctionner
 - Aucun changement de comportement pour les utilisateurs existants
 - Pas de breaking changes
 
-### Systèmes supportés
+### Systï¿½mes supportï¿½s
 
 -  Ubuntu 20.04, 22.04, 24.04
 -  Debian 11, 12
 -  Architecture ARM64 (Apple Silicon, AWS Graviton, Ampere, etc.)
 -  Architecture AMD64 (x86_64)
 
-### Prérequis système
+### Prï¿½requis systï¿½me
 
--  Accès Internet (pour télécharger yq depuis GitHub)
+-  Accï¿½s Internet (pour tï¿½lï¿½charger yq depuis GitHub)
 -  Permissions `sudo` (pour `apt-get` et installation dans `/usr/local/bin`)
--  `wget` installé (généralement présent par défaut)
+-  `wget` installï¿½ (gï¿½nï¿½ralement prï¿½sent par dï¿½faut)
 
 ---
 
-## =æ Fichiers Modifiés
+## =ï¿½ Fichiers Modifiï¿½s
 
 ### kubelet_auto_config.sh
 
@@ -303,7 +341,7 @@ vagrant ssh cp1 -c "cd /vagrant/reserved-sys-kube && \
 - Ajout de la fonction `install_dependencies()` (lignes 240-303)
 - Modification de `check_dependencies()` pour appeler `install_dependencies()`
 - +70 lignes de code
-- Commit: `285fbeb feat: installation automatique des dépendances`
+- Commit: `285fbeb feat: installation automatique des dï¿½pendances`
 
 **Extrait du diff** :
 ```diff
@@ -311,18 +349,18 @@ vagrant ssh cp1 -c "cd /vagrant/reserved-sys-kube && \
 +    local missing_apt=()
 +    local need_yq=false
 +
-+    # Vérifier bc et jq
++    # Vï¿½rifier bc et jq
 +    for cmd in bc jq; do
 +        if ! command -v "$cmd" &> /dev/null; then
 +            missing_apt+=("$cmd")
 +        fi
 +    done
 +
-+    # Vérifier yq (et sa version)
++    # Vï¿½rifier yq (et sa version)
 +    if ! command -v yq &> /dev/null; then
 +        need_yq=true
 +    else
-+        # Vérifier que c'est la bonne version (mikefarah v4+, pas Python v3)
++        # Vï¿½rifier que c'est la bonne version (mikefarah v4+, pas Python v3)
 +        if ! yq --version 2>&1 | grep -q "mikefarah"; then
 +            need_yq=true
 +        fi
@@ -332,10 +370,10 @@ vagrant ssh cp1 -c "cd /vagrant/reserved-sys-kube && \
 +}
 
  check_dependencies() {
-+    # Installer automatiquement les dépendances manquantes
++    # Installer automatiquement les dï¿½pendances manquantes
 +    install_dependencies
 +
-+    # Vérifier que tout est bien installé
++    # Vï¿½rifier que tout est bien installï¿½
      local missing=()
      ...
  }
@@ -346,51 +384,51 @@ vagrant ssh cp1 -c "cd /vagrant/reserved-sys-kube && \
 ### README.md
 
 **Modifications** :
-- Section "Dépendances" réécrite avec badge "( Installation automatique"
-- Instructions d'installation simplifiées (de 25 lignes à 6 lignes)
-- Instructions manuelles déplacées en section optionnelle
+- Section "Dï¿½pendances" rï¿½ï¿½crite avec badge "( Installation automatique"
+- Instructions d'installation simplifiï¿½es (de 25 lignes ï¿½ 6 lignes)
+- Instructions manuelles dï¿½placï¿½es en section optionnelle
 - +14 lignes nettes
-- Commit: `10e2e41 docs: mettre à jour README avec installation automatique des dépendances`
+- Commit: `10e2e41 docs: mettre ï¿½ jour README avec installation automatique des dï¿½pendances`
 
 ---
 
-## =€ Migration depuis v2.0.15
+## =ï¿½ Migration depuis v2.0.15
 
 **Aucune action requise !**
 
-Le script détecte et installe automatiquement les dépendances au premier lancement.
+Le script dï¿½tecte et installe automatiquement les dï¿½pendances au premier lancement.
 
-Si vous aviez déjà installé les dépendances manuellement, elles seront réutilisées (pas de réinstallation inutile grâce à l'idempotence).
+Si vous aviez dï¿½jï¿½ installï¿½ les dï¿½pendances manuellement, elles seront rï¿½utilisï¿½es (pas de rï¿½installation inutile grï¿½ce ï¿½ l'idempotence).
 
 ---
 
-## =¡ Cas d'Usage
+## =ï¿½ Cas d'Usage
 
 ### Cas 1 : Nouvel Utilisateur
 
 **Avant v2.0.16** :
 ```bash
-# Télécharger le script
+# Tï¿½lï¿½charger le script
 wget https://gitlab.com/.../kubelet_auto_config.sh
 
-# Installer les dépendances (5-10 minutes)
+# Installer les dï¿½pendances (5-10 minutes)
 sudo apt update && sudo apt install -y bc jq
 # [20 lignes pour installer yq...]
 
-# Exécuter le script
+# Exï¿½cuter le script
 sudo ./kubelet_auto_config.sh --profile gke --dry-run
 ```
 
-**Après v2.0.16** :
+**Aprï¿½s v2.0.16** :
 ```bash
-# Télécharger le script
+# Tï¿½lï¿½charger le script
 wget https://gitlab.com/.../kubelet_auto_config.sh
 
-# Exécuter directement (dépendances installées automatiquement)
+# Exï¿½cuter directement (dï¿½pendances installï¿½es automatiquement)
 sudo ./kubelet_auto_config.sh --profile gke --dry-run
 ```
 
- Gain de temps : **10 minutes** ’ **30 secondes**
+ Gain de temps : **10 minutes** ï¿½ **30 secondes**
 
 ---
 
@@ -409,55 +447,55 @@ deploy:
     - sudo ./kubelet_auto_config.sh --profile eks --target-pods 110
 ```
 
-**Après v2.0.16** :
+**Aprï¿½s v2.0.16** :
 ```yaml
 # .gitlab-ci.yml
 deploy:
   script:
     - sudo ./kubelet_auto_config.sh --profile eks --target-pods 110
-    # Dépendances installées automatiquement !
+    # Dï¿½pendances installï¿½es automatiquement !
 ```
 
- Simplification du pipeline (4 lignes supprimées)
+ Simplification du pipeline (4 lignes supprimï¿½es)
 
 ---
 
 ### Cas 3 : Ansible Playbook (alternative)
 
-Pour ceux qui préfèrent Ansible, le playbook `ansible/deploy-kubelet-config.yml` continue de fonctionner avec la même logique d'auto-installation.
+Pour ceux qui prï¿½fï¿½rent Ansible, le playbook `ansible/deploy-kubelet-config.yml` continue de fonctionner avec la mï¿½me logique d'auto-installation.
 
-Les deux approches (script standalone + Ansible) sont maintenant cohérentes.
+Les deux approches (script standalone + Ansible) sont maintenant cohï¿½rentes.
 
 ---
 
-## <“ Leçons Apprises
+## <ï¿½ Leï¿½ons Apprises
 
 ### Points Positifs
 
-1. **Détection de version yq** : `yq --version | grep mikefarah` permet de différencier Python v3 de mikefarah v4
-2. **Silent install** : `apt-get -qq` et `wget -q` réduisent le bruit dans les logs
-3. **Architecture detection** : `uname -m` fonctionne de manière fiable sur ARM64/AMD64
-4. **Idempotence** : Vérifier avant d'installer évite les réinstallations inutiles
-5. **Cohérence** : Même logique entre script standalone et playbook Ansible
+1. **Dï¿½tection de version yq** : `yq --version | grep mikefarah` permet de diffï¿½rencier Python v3 de mikefarah v4
+2. **Silent install** : `apt-get -qq` et `wget -q` rï¿½duisent le bruit dans les logs
+3. **Architecture detection** : `uname -m` fonctionne de maniï¿½re fiable sur ARM64/AMD64
+4. **Idempotence** : Vï¿½rifier avant d'installer ï¿½vite les rï¿½installations inutiles
+5. **Cohï¿½rence** : Mï¿½me logique entre script standalone et playbook Ansible
 
 ### Points d'Attention
 
-1. **Connectivité Internet** : Téléchargement de yq depuis GitHub requis (pas de mode offline)
-2. **Permissions** : Nécessite `sudo` pour installer via apt et écrire dans `/usr/local/bin`
+1. **Connectivitï¿½ Internet** : Tï¿½lï¿½chargement de yq depuis GitHub requis (pas de mode offline)
+2. **Permissions** : Nï¿½cessite `sudo` pour installer via apt et ï¿½crire dans `/usr/local/bin`
 3. **Firewall** : Certains environnements peuvent bloquer `wget` vers GitHub
-4. **Proxy** : Les environnements avec proxy HTTP nécessitent configuration préalable
+4. **Proxy** : Les environnements avec proxy HTTP nï¿½cessitent configuration prï¿½alable
 
 ---
 
-## =Ú Ressources
+## =ï¿½ Ressources
 
 ### Documentation
 
-- [README principal](README.md) - Section Dépendances mise à jour
+- [README principal](README.md) - Section Dï¿½pendances mise ï¿½ jour
 - [Guide Ansible](ansible/README.md) - Installation automatique via playbook
 - [Guide DaemonSet](daemonset/README.md) - Installation dans conteneurs
 
-### Dépendances
+### Dï¿½pendances
 
 - **yq v4** : https://github.com/mikefarah/yq/releases (version 4.44.3)
 - **bc** : Paquet Ubuntu standard (GNU bc 1.07+)
@@ -465,40 +503,40 @@ Les deux approches (script standalone + Ansible) sont maintenant cohérentes.
 
 ### Changelogs Connexes
 
-- [CHANGELOG_v2.0.14.md](CHANGELOG_v2.0.14.md) - Validation des 3 méthodes de déploiement
+- [CHANGELOG_v2.0.14.md](CHANGELOG_v2.0.14.md) - Validation des 3 mï¿½thodes de dï¿½ploiement
 - [CHANGELOG_v2.0.15.md](CHANGELOG_v2.0.15.md) - Lab monitoring kubelet (Prometheus/Grafana)
 
 ---
 
-## =. Prochaines Étapes
+## =. Prochaines ï¿½tapes
 
-Améliorations possibles pour les versions futures :
+Amï¿½liorations possibles pour les versions futures :
 
-1. **Cache des binaires** : Stocker `yq` dans le repo pour éviter le téléchargement
-2. **Support offline** : Mode dégradé si GitHub inaccessible (binaire inclus)
-3. **Vérification checksums** : Valider l'intégrité des binaires téléchargés (SHA256)
+1. **Cache des binaires** : Stocker `yq` dans le repo pour ï¿½viter le tï¿½lï¿½chargement
+2. **Support offline** : Mode dï¿½gradï¿½ si GitHub inaccessible (binaire inclus)
+3. **Vï¿½rification checksums** : Valider l'intï¿½gritï¿½ des binaires tï¿½lï¿½chargï¿½s (SHA256)
 4. **Multi-distributions** : Support Red Hat, CentOS, Alpine
-5. **Support proxy** : Détection et configuration automatique du proxy HTTP
+5. **Support proxy** : Dï¿½tection et configuration automatique du proxy HTTP
 
 ---
 
-## <‰ Conclusion
+## <ï¿½ Conclusion
 
-La **v2.0.16** représente une **amélioration majeure de l'UX** avec l'installation automatique des dépendances.
+La **v2.0.16** reprï¿½sente une **amï¿½lioration majeure de l'UX** avec l'installation automatique des dï¿½pendances.
 
-**Résumé des gains** :
-- ñ **Gain de temps** : 5-10 minutes économisées (90% de réduction)
-- =á **Fiabilité** : Garantie d'installer la bonne version de yq (v4 mikefarah)
-- =€ **Simplicité** : Une seule commande suffit
-- < **Support multi-arch** : ARM64 et AMD64 détectés automatiquement
+**Rï¿½sumï¿½ des gains** :
+- ï¿½ **Gain de temps** : 5-10 minutes ï¿½conomisï¿½es (90% de rï¿½duction)
+- =ï¿½ **Fiabilitï¿½** : Garantie d'installer la bonne version de yq (v4 mikefarah)
+- =ï¿½ **Simplicitï¿½** : Une seule commande suffit
+- < **Support multi-arch** : ARM64 et AMD64 dï¿½tectï¿½s automatiquement
 -  **Zero-config** : Fonctionne out-of-the-box
 
-**Le script est désormais vraiment "zero-config" et prêt pour la production.**
+**Le script est dï¿½sormais vraiment "zero-config" et prï¿½t pour la production.**
 
-Cette amélioration, combinée avec les 3 méthodes de déploiement validées (v2.0.14) et le lab monitoring (v2.0.15), fait du projet une solution **production-ready** complète pour la gestion des réservations kubelet.
+Cette amï¿½lioration, combinï¿½e avec les 3 mï¿½thodes de dï¿½ploiement validï¿½es (v2.0.14) et le lab monitoring (v2.0.15), fait du projet une solution **production-ready** complï¿½te pour la gestion des rï¿½servations kubelet.
 
 ---
 
 **Mainteneur** : Platform Engineering Team
 **Date de release** : 22 octobre 2025
-**Prochaine version** : TBD (améliorations possibles : cache binaires, support offline)
+**Prochaine version** : TBD (amï¿½liorations possibles : cache binaires, support offline)
