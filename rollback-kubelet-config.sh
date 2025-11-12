@@ -87,7 +87,7 @@ function list_permanent_backups() {
 SELECTED=""
 SOURCE_TYPE=""
 
-rotating_backups=( $(list_rotating_backups) )
+mapfile -t rotating_backups < <(list_rotating_backups)
 declare -A rotating_map=()
 for path in "${rotating_backups[@]}"; do
     # extract last component after dot
@@ -120,7 +120,7 @@ fi
 
 if [[ -z "$SELECTED" ]]; then
     # fallback to permanent backups
-    permanent_backups=( $(list_permanent_backups) )
+    mapfile -t permanent_backups < <(list_permanent_backups)
     if [[ ${#permanent_backups[@]} -gt 0 ]]; then
         SELECTED="${permanent_backups[0]}"
         SOURCE_TYPE="permanent"
@@ -129,6 +129,16 @@ fi
 
 if [[ -z "$SELECTED" ]]; then
     echo "✗ No kubelet backup found (rotating or permanent)." >&2
+    exit 1
+fi
+
+if [[ ! -f "$SELECTED" ]]; then
+    echo "✗ Selected backup file does not exist: $SELECTED" >&2
+    exit 1
+fi
+
+if [[ ! -r "$SELECTED" ]]; then
+    echo "✗ Selected backup file is not readable: $SELECTED" >&2
     exit 1
 fi
 
