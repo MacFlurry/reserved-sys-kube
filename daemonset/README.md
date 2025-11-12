@@ -271,4 +271,4 @@ sudo systemctl restart kubelet
 Pour toute question ou problème :
 - README principal du projet
 - Section Troubleshooting du README.md
-- Issues GitLab : https://gitlab.com/omega8280051/reserved-sys-kube/-/issues
+- Issues GitHub : https://github.com/MacFlurry/reserved-sys-kube/issues

@@ -257,4 +257,4 @@ kubectl describe node w1 | grep -A 10 Allocatable
 Pour toute question ou problème, consultez :
 - README principal du projet
 - Section Troubleshooting
-- Issues GitLab : https://gitlab.com/omega8280051/reserved-sys-kube/-/issues
+- Issues GitHub : https://github.com/MacFlurry/reserved-sys-kube/issues

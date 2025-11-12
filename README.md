@@ -120,7 +120,7 @@ sudo ./kubelet_auto_config.sh
 
 ```bash
 # Télécharger le script
-curl -O https://gitlab.com/omega8280051/reserved-sys-kube/-/raw/main/kubelet_auto_config.sh
+curl -O https://github.com/MacFlurry/reserved-sys-kube/raw/main/kubelet_auto_config.sh
 
 # Rendre exécutable
 chmod +x kubelet_auto_config.sh
@@ -132,7 +132,7 @@ chmod +x kubelet_auto_config.sh
 ### Méthode 2 : Via Git
 
 ```bash
-git clone https://gitlab.com/omega8280051/reserved-sys-kube.git
+git clone https://github.com/MacFlurry/reserved-sys-kube.git
 cd reserved-sys-kube
 chmod +x kubelet_auto_config.sh
 ```
@@ -1673,7 +1673,7 @@ SOFTWARE.
 
 ### Communauté
 
-- **GitLab Issues** : https://gitlab.com/omega8280051/reserved-sys-kube/-/issues
+- **GitHub Issues** : https://github.com/MacFlurry/reserved-sys-kube/issues
 
 ---
 
