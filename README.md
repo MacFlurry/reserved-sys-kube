@@ -1209,7 +1209,7 @@ sudo vi /var/lib/kubelet/config.yaml
 # line 42: bc: command not found
 ```
 
-**⚠️ Note** : Depuis la **v2.0.16**, le script installe **automatiquement** les dépendances manquantes (`bc`, `jq`, `yq v4`). Ce problème ne devrait plus se produire.
+**⚠️ Note** : Depuis la **v2.0.16** (incluse dans v3.0.0), le script installe **automatiquement** les dépendances manquantes (`bc`, `jq`, `yq v4`) avec vérification SHA256. Ce problème ne devrait plus se produire.
 
 **Si le problème persiste** :
 
@@ -1600,16 +1600,17 @@ Ouvrez une issue sur GitHub avec :
 Pour l'historique complet des versions, consultez les fichiers de changelog dédiés :
 
 - **[CHANGELOG_v3.0.0.md](CHANGELOG_v3.0.0.md)** - Version actuelle (hardening production et sécurité renforcée)
-- **[CHANGELOG_v2.0.16.md](CHANGELOG_v2.0.16.md)** - Installation automatique des dépendances
-- **[CHANGELOG_v2.0.15.md](CHANGELOG_v2.0.15.md)** - Lab monitoring kubelet (Prometheus/Grafana)
-- **[CHANGELOG_v2.0.14.md](CHANGELOG_v2.0.14.md)** - Validation complète des 3 méthodes de déploiement
-- **[CHANGELOG_v2.0.13.md](CHANGELOG_v2.0.13.md)** - Garde-fous allocatable & diff automatiques
-- **[CHANGELOG_v2.0.12.md](CHANGELOG_v2.0.12.md)** - Réservations éphémères adaptatives & robustesse kubelet
-- **[CHANGELOG_v2.0.11.md](CHANGELOG_v2.0.11.md)** - Détection automatique control-plane/worker
-- **[CHANGELOG_v2.0.10.md](CHANGELOG_v2.0.10.md)** - Correctifs tests critiques
-- **[CHANGELOG_v2.0.9.md](CHANGELOG_v2.0.9.md)** - Amélioration UX suite de tests
-- **[CHANGELOG_v2.0.8.md](CHANGELOG_v2.0.8.md)** - Correctifs critiques ARM64
-- Versions précédentes : voir le dossier `changelogs/` (si créé)
+
+**Versions précédentes** (archivées dans `changelog/`) :
+- **[v2.0.16](changelog/CHANGELOG_v2.0.16.md)** - Installation automatique des dépendances
+- **[v2.0.15](changelog/CHANGELOG_v2.0.15.md)** - Lab monitoring kubelet (Prometheus/Grafana)
+- **[v2.0.14](changelog/CHANGELOG_v2.0.14.md)** - Validation complète des 3 méthodes de déploiement
+- **[v2.0.13](changelog/CHANGELOG_v2.0.13.md)** - Garde-fous allocatable & diff automatiques
+- **[v2.0.12](changelog/CHANGELOG_v2.0.12.md)** - Réservations éphémères adaptatives & robustesse kubelet
+- **[v2.0.11](changelog/CHANGELOG_v2.0.11.md)** - Détection automatique control-plane/worker
+- **[v2.0.10](changelog/CHANGELOG_v2.0.10.md)** - Correctifs tests critiques
+- **[v2.0.9](changelog/CHANGELOG_v2.0.9.md)** - Amélioration UX suite de tests
+- **[v2.0.8](changelog/CHANGELOG_v2.0.8.md)** - Correctifs critiques ARM64
 
 ### Version Actuelle : v3.0.0
 
@@ -1707,6 +1708,6 @@ SOFTWARE.
 
 ---
 
-**Dernière mise à jour** : 22 oct 2025
-**Version du projet** : 2.0.16 (script v2.0.13)
+**Dernière mise à jour** : 12 nov 2025
+**Version du projet** : 3.0.0
 **Mainteneur** : Platform Engineering Team

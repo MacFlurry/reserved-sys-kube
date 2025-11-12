@@ -864,9 +864,9 @@ install_dependencies() {
 
 ### Changelogs Connexes
 
-- [CHANGELOG_v2.0.16.md](CHANGELOG_v2.0.16.md) - Installation automatique des dépendances
-- [CHANGELOG_v2.0.15.md](CHANGELOG_v2.0.15.md) - Lab monitoring kubelet
-- [CHANGELOG_v2.0.14.md](CHANGELOG_v2.0.14.md) - Validation des 3 méthodes de déploiement
+- [CHANGELOG_v2.0.16.md](changelog/CHANGELOG_v2.0.16.md) - Installation automatique des dépendances
+- [CHANGELOG_v2.0.15.md](changelog/CHANGELOG_v2.0.15.md) - Lab monitoring kubelet
+- [CHANGELOG_v2.0.14.md](changelog/CHANGELOG_v2.0.14.md) - Validation des 3 méthodes de déploiement
 
 ---
 

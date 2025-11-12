@@ -1,10 +1,10 @@
 #!/bin/bash
 ################################################################################
 # Script de configuration automatique des réservations kubelet
-# Version: 2.0.13
+# Version: 3.0.0
 # Compatible: Kubernetes v1.32+, cgroups v1/v2, systemd, Ubuntu
 #
-# Voir CHANGELOG_v2.0.8.md pour l'historique des versions précédentes
+# Voir CHANGELOG_v3.0.0.md pour l'historique complet des changements
 #
 # Usage:
 #   ./kubelet_auto_config.sh [OPTIONS]
