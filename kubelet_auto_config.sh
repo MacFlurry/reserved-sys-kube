@@ -14,8 +14,10 @@
 #   --density-factor <float>                   Facteur multiplicateur 0.1-5.0 (défaut: 1.0, recommandé: 0.5-3.0)
 #   --target-pods <int>                        Nombre de pods cible (calcul auto du facteur)
 #   --node-type <control-plane|worker|auto>    Type de nœud (défaut: auto - détection automatique)
+#   --wait-timeout <seconds>                   Timeout d'attente kubelet en secondes (défaut: 60)
 #   --dry-run                                  Affiche la config sans appliquer
 #   --backup                                   Conserve le backup (par défaut supprimé si succès)
+#   --no-require-deps                          Désactiver mode strict dépendances (non recommandé en prod)
 #   --help                                     Affiche l'aide
 #
 # Exemples:
@@ -31,7 +33,7 @@
 set -euo pipefail
 
 # Version
-VERSION="2.0.13"
+VERSION="3.0.0"
 
 # Couleurs pour l'output
 RED='\033[0;31m'
@@ -48,8 +50,11 @@ NODE_TYPE="auto"
 NODE_TYPE_DETECTED=""
 DRY_RUN=false
 BACKUP=false
+REQUIRE_DEPENDENCIES=true  # Mode production: bloque si dépendances manquantes
+KUBELET_WAIT_TIMEOUT=60    # Timeout d'attente du kubelet (secondes)
 KUBELET_CONFIG="/var/lib/kubelet/config.yaml"
 LOCK_FILE="/var/lock/kubelet-auto-config.lock"
+LOCK_FD=200  # File descriptor pour flock
 
 # Seuils et garde-fous
 MIN_ALLOC_CPU_PERCENT=25         # Pourcentage minimum de CPU allocatable autorisé
@@ -58,8 +63,9 @@ CONTROL_PLANE_MAX_DENSITY=1.0    # Density-factor maximum autorisé sur un contr
 
 # Fonction de nettoyage pour le trap
 cleanup() {
-    if [[ -n "${LOCK_FILE:-}" ]] && [[ -d "$LOCK_FILE" ]]; then
-        rm -rf "$LOCK_FILE" 2>/dev/null || true
+    # Libération du lock flock (automatique à la fermeture du FD)
+    if [[ -n "${LOCK_FD:-}" ]]; then
+        flock -u "$LOCK_FD" 2>/dev/null || true
     fi
 }
 
@@ -100,65 +106,86 @@ normalize_cpu_to_milli() {
     local value=$1
 
     if [[ -z "$value" ]]; then
-        echo ""
-        return
+        log_error "normalize_cpu_to_milli: valeur vide reçue"
+        return 1
     fi
 
     if [[ "$value" =~ m$ ]]; then
-        echo "${value%m}"
-        return
+        local milli="${value%m}"
+        if [[ "$milli" =~ ^[0-9]+$ ]]; then
+            echo "$milli"
+            return 0
+        else
+            log_error "normalize_cpu_to_milli: format invalide '$value' (millicores non numérique)"
+            return 1
+        fi
     fi
 
     if [[ "$value" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
         # Convert cores to milli-cores (arrondi à l'entier le plus proche)
         printf "%.0f" "$(echo "$value * 1000" | bc -l)"
-        return
+        return 0
     fi
 
-    echo ""
+    log_error "normalize_cpu_to_milli: format invalide '$value' (attendu: '100m' ou '1.5')"
+    return 1
 }
 
 normalize_memory_to_mib() {
     local value=$1
 
     if [[ -z "$value" ]]; then
-        echo ""
-        return
+        log_error "normalize_memory_to_mib: valeur vide reçue"
+        return 1
     fi
 
     if [[ "$value" =~ Ki$ ]]; then
         local ki=${value%Ki}
         if [[ "$ki" =~ ^[0-9]+$ ]]; then
             echo $(( (ki + 512) / 1024 ))
-            return
+            return 0
+        else
+            log_error "normalize_memory_to_mib: format invalide '$value' (Ki non numérique)"
+            return 1
         fi
     elif [[ "$value" =~ Mi$ ]]; then
         local mi=${value%Mi}
         if [[ "$mi" =~ ^[0-9]+$ ]]; then
             echo "$mi"
-            return
+            return 0
+        else
+            log_error "normalize_memory_to_mib: format invalide '$value' (Mi non numérique)"
+            return 1
         fi
     elif [[ "$value" =~ Gi$ ]]; then
         local gi=${value%Gi}
         if [[ "$gi" =~ ^[0-9]+$ ]]; then
             echo $(( gi * 1024 ))
-            return
+            return 0
+        else
+            log_error "normalize_memory_to_mib: format invalide '$value' (Gi non numérique)"
+            return 1
         fi
     fi
 
-    echo ""
+    log_error "normalize_memory_to_mib: format invalide '$value' (attendu: '100Mi', '2Gi', '1024Ki')"
+    return 1
 }
 
 get_current_allocatable_snapshot() {
     if ! command -v kubectl >/dev/null 2>&1; then
         echo ""
-        return
+        return 0
     fi
 
+    # Fallback kubeconfig avec priorités
     local kubeconfig=""
-    if [[ -f /etc/kubernetes/kubelet.conf ]]; then
-        kubeconfig="--kubeconfig=/etc/kubernetes/kubelet.conf"
-    fi
+    for conf in /etc/kubernetes/kubelet.conf "${KUBECONFIG:-}" ~/.kube/config; do
+        if [[ -n "$conf" ]] && [[ -f "$conf" ]]; then
+            kubeconfig="--kubeconfig=$conf"
+            break
+        fi
+    done
 
     local node_name
     node_name=$(hostname)
@@ -166,22 +193,23 @@ get_current_allocatable_snapshot() {
     local raw
     if ! raw=$(kubectl $kubeconfig get node "$node_name" -o jsonpath='{.status.allocatable.cpu},{.status.allocatable.memory}' 2>/dev/null); then
         echo ""
-        return
+        return 0
     fi
 
     local cpu_value=${raw%%,*}
     local mem_value=${raw##*,}
-    local cpu_milli
-    cpu_milli=$(normalize_cpu_to_milli "$cpu_value")
-    local mem_mib
-    mem_mib=$(normalize_memory_to_mib "$mem_value")
 
-    if [[ -z "$cpu_milli" ]] || [[ -z "$mem_mib" ]]; then
+    # Tentative de normalisation (non bloquant pour snapshot)
+    local cpu_milli
+    local mem_mib
+    if cpu_milli=$(normalize_cpu_to_milli "$cpu_value" 2>/dev/null) && \
+       mem_mib=$(normalize_memory_to_mib "$mem_value" 2>/dev/null); then
+        echo "${cpu_milli}:${mem_mib}"
+    else
         echo ""
-        return
     fi
 
-    echo "${cpu_milli}:${mem_mib}"
+    return 0
 }
 
 usage() {
@@ -198,8 +226,15 @@ check_root() {
 
 check_os() {
     if [[ -r /etc/os-release ]]; then
+        # Validation anti-injection : détecter backticks ou command substitution non quotés (vrais dangers)
+        # Note: grep retourne 1 si aucune correspondance, donc on inverse la logique
+        if grep -qE '^[^#]*`[^"]*$|^\$\([^)]' /etc/os-release; then
+            log_error "Fichier /etc/os-release contient des patterns d'injection dangereux"
+        fi
+
         # shellcheck disable=SC1091
         source /etc/os-release
+
         if [[ "${ID}" != "ubuntu" ]]; then
             log_error "Système non supporté détecté (${PRETTY_NAME:-$ID}). Ce script est compatible uniquement avec Ubuntu."
         fi
@@ -210,30 +245,20 @@ check_os() {
 
 acquire_lock() {
     local timeout=30
-    local elapsed=0
 
-    # Nettoyage préventif si le lock est un dossier orphelin
-    if [[ -d "$LOCK_FILE" ]]; then
-        local lock_pid
-        lock_pid=$(cat "$LOCK_FILE/pid" 2>/dev/null || echo "")
+    # Créer le fichier de lock s'il n'existe pas
+    touch "$LOCK_FILE" 2>/dev/null || log_error "Impossible de créer le fichier de lock: $LOCK_FILE"
 
-        # Vérifier si le processus existe encore
-        if [[ -n "$lock_pid" ]] && ! kill -0 "$lock_pid" 2>/dev/null; then
-            log_warning "Lock file orphelin détecté (PID $lock_pid mort), nettoyage..."
-            rm -rf "$LOCK_FILE"
-        fi
+    # Ouvrir le FD et tenter d'acquérir le lock avec timeout
+    eval "exec $LOCK_FD>$LOCK_FILE"
+
+    if ! flock -w "$timeout" "$LOCK_FD"; then
+        log_error "Un autre processus exécute déjà ce script (timeout après ${timeout}s)"
     fi
 
-    while ! mkdir "$LOCK_FILE" 2>/dev/null; do
-        if (( elapsed >= timeout )); then
-            log_error "Un autre processus exécute déjà ce script (timeout après ${timeout}s)"
-        fi
-        log_warning "Script déjà en cours d'exécution... Attente ($elapsed/$timeout s)"
-        sleep 2
-        ((elapsed += 2))
-    done
+    # Écrire le PID dans le lock file pour traçabilité
+    echo $$ >&"$LOCK_FD"
 
-    echo $$ > "$LOCK_FILE/pid"
     log_info "Lock acquis (PID $$)"
 }
 
@@ -271,8 +296,29 @@ install_dependencies() {
     # Installer bc et jq via apt
     if [[ ${#missing_apt[@]} -gt 0 ]]; then
         log_info "Installation de ${missing_apt[*]} via apt..."
-        apt-get update -qq >/dev/null 2>&1 || log_error "apt update échoué"
-        apt-get install -y -qq "${missing_apt[@]}" >/dev/null 2>&1 || log_error "Installation ${missing_apt[*]} échouée"
+
+        # Mode production: bloquer si installation échoue
+        if [[ "$REQUIRE_DEPENDENCIES" == true ]]; then
+            log_warning "Mode production: installation automatique des dépendances"
+        fi
+
+        # apt avec timeout de 30 secondes
+        if ! apt-get -o Acquire::http::Timeout=30 -o Acquire::ftp::Timeout=30 update -qq >/dev/null 2>&1; then
+            if [[ "$REQUIRE_DEPENDENCIES" == true ]]; then
+                log_error "apt update échoué (timeout ou réseau inaccessible)"
+            else
+                log_warning "apt update échoué, continuant..."
+            fi
+        fi
+
+        if ! apt-get install -y -qq "${missing_apt[@]}" >/dev/null 2>&1; then
+            if [[ "$REQUIRE_DEPENDENCIES" == true ]]; then
+                log_error "Installation ${missing_apt[*]} échouée"
+            else
+                log_warning "Installation ${missing_apt[*]} échouée, continuant..."
+            fi
+        fi
+
         log_success "${missing_apt[*]} installé(s)"
     fi
 
@@ -284,21 +330,51 @@ install_dependencies() {
         local arch
         arch=$(uname -m)
         local yq_binary
+        local yq_sha256
+
         case "$arch" in
-            x86_64|amd64)   yq_binary="yq_linux_amd64" ;;
-            arm64|aarch64)  yq_binary="yq_linux_arm64" ;;
-            *) log_error "Architecture non supportée pour yq: $arch" ;;
+            x86_64|amd64)
+                yq_binary="yq_linux_amd64"
+                yq_sha256="f0cecf04c0eb85e6d8b8370a9e2629c88c7c15c1f94a828f9c3838515d779b5f"
+                ;;
+            arm64|aarch64)
+                yq_binary="yq_linux_arm64"
+                yq_sha256="4d10a57ff315ba5f7475bb43345f782c38a6cb5253b2b5c45e7de2fb9b7c87f8"
+                ;;
+            *)
+                log_error "Architecture non supportée pour yq: $arch"
+                ;;
         esac
 
-        # Télécharger yq v4
+        # Télécharger yq v4 avec timeout et retries
         local yq_version="v4.44.3"
         local yq_url="https://github.com/mikefarah/yq/releases/download/${yq_version}/${yq_binary}"
 
-        wget -qO /tmp/yq "$yq_url" >/dev/null 2>&1 || log_error "Téléchargement yq échoué depuis $yq_url"
-        chmod +x /tmp/yq
-        mv /tmp/yq /usr/local/bin/yq || log_error "Installation yq échouée"
+        if ! wget --timeout=30 --tries=3 -qO /tmp/yq "$yq_url" 2>/dev/null; then
+            if [[ "$REQUIRE_DEPENDENCIES" == true ]]; then
+                log_error "Téléchargement yq échoué depuis $yq_url (timeout ou réseau inaccessible)"
+            else
+                log_warning "Téléchargement yq échoué, continuant..."
+                return 0
+            fi
+        fi
 
-        log_success "yq $yq_version installé"
+        # Vérification SHA256 (protection supply chain)
+        log_info "Vérification de l'intégrité de yq (SHA256)..."
+        if ! echo "${yq_sha256}  /tmp/yq" | sha256sum -c - >/dev/null 2>&1; then
+            rm -f /tmp/yq
+            if [[ "$REQUIRE_DEPENDENCIES" == true ]]; then
+                log_error "Checksum SHA256 invalide pour yq ! Supply chain attack possible. Téléchargement refusé."
+            else
+                log_warning "Checksum SHA256 invalide pour yq ! Continuant sans yq (mode test)..."
+                return 0
+            fi
+        fi
+
+        chmod +x /tmp/yq
+        mv /tmp/yq /usr/local/bin/yq || log_error "Installation yq échouée (impossible de déplacer vers /usr/local/bin)"
+
+        log_success "yq $yq_version installé (SHA256 vérifié)"
     fi
 }
 
@@ -931,13 +1007,30 @@ validate_kubelet_slice_attachment() {
 
     if [[ -n "$kubelet_pid" ]] && [[ "$kubelet_pid" != "0" ]]; then
         local kubelet_cgroup
-        kubelet_cgroup=$(cat "/proc/$kubelet_pid/cgroup" 2>/dev/null | grep -E '0::|0:/' | cut -d: -f3)
 
-        if echo "$kubelet_cgroup" | grep -q "kubelet.slice"; then
-            log_success "✓ Processus kubelet (PID $kubelet_pid) dans le bon cgroup"
-            log_info "  → Cgroup: $kubelet_cgroup"
+        # Parsing robuste avec fallback cgroup v1/v2
+        if [[ -f "/proc/$kubelet_pid/cgroup" ]]; then
+            # cgroup v2: ligne unique avec "0::"
+            kubelet_cgroup=$(grep -E '^0::' "/proc/$kubelet_pid/cgroup" 2>/dev/null | cut -d: -f3)
+
+            # Fallback cgroup v1: chercher la ligne cpu ou memory
+            if [[ -z "$kubelet_cgroup" ]]; then
+                kubelet_cgroup=$(grep -E '^[0-9]+:(cpu|memory):' "/proc/$kubelet_pid/cgroup" 2>/dev/null | head -n1 | cut -d: -f3)
+            fi
+
+            # Vérification
+            if [[ -n "$kubelet_cgroup" ]]; then
+                if echo "$kubelet_cgroup" | grep -q "kubelet.slice"; then
+                    log_success "✓ Processus kubelet (PID $kubelet_pid) dans le bon cgroup"
+                    log_info "  → Cgroup: $kubelet_cgroup"
+                else
+                    log_warning "✗ Processus kubelet dans un cgroup inattendu: $kubelet_cgroup"
+                fi
+            else
+                log_warning "Impossible de parser le cgroup du kubelet (format inattendu)"
+            fi
         else
-            log_warning "✗ Processus kubelet dans un cgroup inattendu: $kubelet_cgroup"
+            log_warning "Fichier /proc/$kubelet_pid/cgroup introuvable"
         fi
     fi
 
@@ -1294,12 +1387,24 @@ main() {
                 NODE_TYPE="$2"
                 shift 2
                 ;;
+            --wait-timeout)
+                KUBELET_WAIT_TIMEOUT="$2"
+                if ! [[ "$KUBELET_WAIT_TIMEOUT" =~ ^[0-9]+$ ]]; then
+                    log_error "--wait-timeout doit être un entier positif (reçu: $KUBELET_WAIT_TIMEOUT)"
+                fi
+                shift 2
+                ;;
             --dry-run)
                 DRY_RUN=true
                 shift
                 ;;
             --backup)
                 BACKUP=true
+                shift
+                ;;
+            --no-require-deps)
+                REQUIRE_DEPENDENCIES=false
+                log_warning "Mode strict dépendances désactivé (non recommandé en production)"
                 shift
                 ;;
             --help)
@@ -1551,9 +1656,9 @@ main() {
     log_success "Kubelet redémarré avec succès"
 
     # Vérification de la stabilité
-    log_info "Vérification de la stabilité du kubelet (jusqu'à 60s)..."
+    log_info "Vérification de la stabilité du kubelet (jusqu'à ${KUBELET_WAIT_TIMEOUT}s)..."
     local wait_interval=5
-    local max_wait=60
+    local max_wait=$KUBELET_WAIT_TIMEOUT
     local elapsed=0
     local kubelet_active=false
 
