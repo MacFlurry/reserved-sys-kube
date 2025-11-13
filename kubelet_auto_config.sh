@@ -1,39 +1,39 @@
 #!/bin/bash
 ################################################################################
-# Script de configuration automatique des réservations kubelet
+# Automatic kubelet reservation configuration script
 # Version: 3.0.0
-# Compatible: Kubernetes v1.32+, cgroups v1/v2, systemd, Ubuntu
+# Tested on Kubernetes v1.32+, cgroups v1/v2, systemd, Ubuntu
 #
-# Voir CHANGELOG_v3.0.0.md pour l'historique complet des changements
+# See CHANGELOG_v3.0.0.md for the full list of changes.
 #
 # Usage:
 #   ./kubelet_auto_config.sh [OPTIONS]
 #
 # Options:
-#   --profile <gke|eks|conservative|minimal>  Profil de calcul (défaut: gke)
-#   --density-factor <float>                   Facteur multiplicateur 0.1-5.0 (défaut: 1.0, recommandé: 0.5-3.0)
-#   --target-pods <int>                        Nombre de pods cible (calcul auto du facteur)
-#   --node-type <control-plane|worker|auto>    Type de nœud (défaut: auto - détection automatique)
-#   --wait-timeout <seconds>                   Timeout d'attente kubelet en secondes (défaut: 60)
-#   --dry-run                                  Affiche la config sans appliquer
-#   --backup                                   Conserve le backup (par défaut supprimé si succès)
-#   --no-require-deps                          Désactiver mode strict dépendances (non recommandé en prod)
-#   --help                                     Affiche l'aide
+#   --profile <gke|eks|conservative|minimal>  Reservation profile (default: gke)
+#   --density-factor <float>                  Multiplier between 0.1 and 5.0 (default: 1.0, recommended: 0.5-3.0)
+#   --target-pods <int>                       Desired pod count (density factor computed automatically)
+#   --node-type <control-plane|worker|auto>   Force the node type (default: auto detection)
+#   --wait-timeout <seconds>                  Kubelet wait timeout in seconds (default: 60)
+#   --dry-run                                 Show the configuration without applying it
+#   --backup                                  Keep the timestamped backup (instead of only rotating)
+#   --no-require-deps                         Disable strict dependency mode (lab only)
+#   --help                                    Display this help message
 #
-# Exemples:
+# Examples:
 #   ./kubelet_auto_config.sh
 #   ./kubelet_auto_config.sh --profile conservative --density-factor 1.5
 #   ./kubelet_auto_config.sh --target-pods 110 --profile conservative
-#   ./kubelet_auto_config.sh --node-type control-plane  # Forcer le mode control-plane
+#   ./kubelet_auto_config.sh --node-type control-plane  # Force control-plane mode
 #   ./kubelet_auto_config.sh --dry-run
 #
-# Dépendances: bc, jq, systemctl, yq
+# Dependencies: bc, jq, systemctl, yq
 ################################################################################
 
 set -euo pipefail
 
 # Version
-VERSION="3.0.0"
+VERSION="3.0.1"
 
 # Couleurs pour l'output
 RED='\033[0;31m'
@@ -50,26 +50,26 @@ NODE_TYPE="auto"
 NODE_TYPE_DETECTED=""
 DRY_RUN=false
 BACKUP=false
-REQUIRE_DEPENDENCIES=true  # Mode production: bloque si dépendances manquantes
+REQUIRE_DEPENDENCIES=true  # Production mode: block when dependencies are missing
 KUBELET_WAIT_TIMEOUT=60    # Timeout d'attente du kubelet (secondes)
 KUBELET_CONFIG="/var/lib/kubelet/config.yaml"
 LOCK_FILE="/var/lock/kubelet-auto-config.lock"
 LOCK_FD=200  # File descriptor pour flock
 
 # Seuils et garde-fous
-MIN_ALLOC_CPU_PERCENT=25         # Pourcentage minimum de CPU allocatable autorisé
-MIN_ALLOC_MEM_PERCENT=20         # Pourcentage minimum de mémoire allocatable autorisé
-CONTROL_PLANE_MAX_DENSITY=1.0    # Density-factor maximum autorisé sur un control-plane
+MIN_ALLOC_CPU_PERCENT=25         # Minimum allowed allocatable CPU percentage
+MIN_ALLOC_MEM_PERCENT=20         # Minimum allowed allocatable memory percentage
+CONTROL_PLANE_MAX_DENSITY=1.0    # Maximum density factor allowed on a control-plane
 
 # Fonction de nettoyage pour le trap
 cleanup() {
-    # Libération du lock flock (automatique à la fermeture du FD)
+    # Release the flock lock (automatically happens when the FD closes)
     if [[ -n "${LOCK_FD:-}" ]]; then
         flock -u "$LOCK_FD" 2>/dev/null || true
     fi
 }
 
-# Enregistrer le trap dès le début
+# Register the trap immediately
 trap cleanup EXIT
 
 ################################################################################
@@ -106,7 +106,7 @@ normalize_cpu_to_milli() {
     local value=$1
 
     if [[ -z "$value" ]]; then
-        log_error "normalize_cpu_to_milli: valeur vide reçue"
+        log_error "normalize_cpu_to_milli: empty value received"
         return 1
     fi
 
@@ -116,13 +116,13 @@ normalize_cpu_to_milli() {
             echo "$milli"
             return 0
         else
-            log_error "normalize_cpu_to_milli: format invalide '$value' (millicores non numérique)"
+            log_error "normalize_cpu_to_milli: invalid format '$value' (non-numeric millicores)"
             return 1
         fi
     fi
 
     if [[ "$value" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
-        # Convert cores to milli-cores (arrondi à l'entier le plus proche)
+        # Convert cores to milli-cores (rounded to the nearest integer)
         printf "%.0f" "$(echo "$value * 1000" | bc -l)"
         return 0
     fi
@@ -135,7 +135,7 @@ normalize_memory_to_mib() {
     local value=$1
 
     if [[ -z "$value" ]]; then
-        log_error "normalize_memory_to_mib: valeur vide reçue"
+        log_error "normalize_memory_to_mib: empty value received"
         return 1
     fi
 
@@ -145,7 +145,7 @@ normalize_memory_to_mib() {
             echo $(( (ki + 512) / 1024 ))
             return 0
         else
-            log_error "normalize_memory_to_mib: format invalide '$value' (Ki non numérique)"
+            log_error "normalize_memory_to_mib: invalid format '$value' (non-numeric Ki)"
             return 1
         fi
     elif [[ "$value" =~ Mi$ ]]; then
@@ -154,7 +154,7 @@ normalize_memory_to_mib() {
             echo "$mi"
             return 0
         else
-            log_error "normalize_memory_to_mib: format invalide '$value' (Mi non numérique)"
+            log_error "normalize_memory_to_mib: invalid format '$value' (non-numeric Mi)"
             return 1
         fi
     elif [[ "$value" =~ Gi$ ]]; then
@@ -163,7 +163,7 @@ normalize_memory_to_mib() {
             echo $(( gi * 1024 ))
             return 0
         else
-            log_error "normalize_memory_to_mib: format invalide '$value' (Gi non numérique)"
+            log_error "normalize_memory_to_mib: invalid format '$value' (non-numeric Gi)"
             return 1
         fi
     fi
@@ -178,7 +178,7 @@ get_current_allocatable_snapshot() {
         return 0
     fi
 
-    # Fallback kubeconfig avec priorités
+    # Fallback kubeconfig with priorities
     local kubeconfig=""
     for conf in /etc/kubernetes/kubelet.conf "${KUBECONFIG:-}" ~/.kube/config; do
         if [[ -n "$conf" ]] && [[ -f "$conf" ]]; then
@@ -213,20 +213,20 @@ get_current_allocatable_snapshot() {
 }
 
 usage() {
-    # Afficher uniquement la section Usage jusqu'à Dépendances
-    sed -n '/^# Usage:/,/^# Dépendances:/p' "$0" | grep "^#" | sed 's/^# //' | sed 's/^#//'
+    # Print only the Usage section through Dependencies
+    sed -n '/^# Usage:/,/^# Dependencies:/p' "$0" | grep "^#" | sed 's/^# //' | sed 's/^#//'
     exit 0
 }
 
 check_root() {
     if [[ $EUID -ne 0 ]]; then
-        log_error "Ce script doit être exécuté en tant que root (sudo)"
+        log_error "This script must be run as root (sudo)"
     fi
 }
 
 check_os() {
     if [[ -r /etc/os-release ]]; then
-        # Validation anti-injection : détecter backticks ou command substitution non quotés (vrais dangers)
+        # Anti-injection validation: detect backticks or unquoted command substitution
         # Note: grep retourne 1 si aucune correspondance, donc on inverse la logique
         if grep -qE '^[^#]*`[^"]*$|^\$\([^)]' /etc/os-release; then
             log_error "Fichier /etc/os-release contient des patterns d'injection dangereux"
@@ -236,27 +236,27 @@ check_os() {
         source /etc/os-release
 
         if [[ "${ID}" != "ubuntu" ]]; then
-            log_error "Système non supporté détecté (${PRETTY_NAME:-$ID}). Ce script est compatible uniquement avec Ubuntu."
+            log_error "Unsupported system detected (${PRETTY_NAME:-$ID}). This script only supports Ubuntu."
         fi
     else
-        log_error "Impossible de détecter la distribution (fichier /etc/os-release introuvable). Ce script supporte uniquement Ubuntu."
+        log_error "Unable to detect distribution (/etc/os-release missing). This script only supports Ubuntu."
     fi
 }
 
 acquire_lock() {
     local timeout=30
 
-    # Créer le fichier de lock s'il n'existe pas
-    touch "$LOCK_FILE" 2>/dev/null || log_error "Impossible de créer le fichier de lock: $LOCK_FILE"
+    # Create the lock file if it does not exist
+    touch "$LOCK_FILE" 2>/dev/null || log_error "Unable to create lock file: $LOCK_FILE"
 
-    # Ouvrir le FD et tenter d'acquérir le lock avec timeout
+    # Open the FD and try to acquire the lock with a timeout
     eval "exec $LOCK_FD>$LOCK_FILE"
 
     if ! flock -w "$timeout" "$LOCK_FD"; then
-        log_error "Un autre processus exécute déjà ce script (timeout après ${timeout}s)"
+        log_error "Another process is already running this script (timeout after ${timeout}s)"
     fi
 
-    # Écrire le PID dans le lock file pour traçabilité
+    # Write the PID to the lock file for traceability
     echo $$ >&"$LOCK_FD"
 
     log_info "Lock acquis (PID $$)"
@@ -266,67 +266,67 @@ install_dependencies() {
     local missing_apt=()
     local need_yq=false
 
-    # Vérifier bc et jq
+    # Check bc and jq
     for cmd in bc jq; do
         if ! command -v "$cmd" &> /dev/null; then
             missing_apt+=("$cmd")
         fi
     done
 
-    # Vérifier yq (et sa version)
+    # Check yq (and its version)
     if ! command -v yq &> /dev/null; then
         need_yq=true
     else
-        # Vérifier que c'est la bonne version (mikefarah v4+, pas Python v3)
+        # Ensure we are using the mikefarah v4+ binary (not Python v3)
         if ! yq --version 2>&1 | grep -q "mikefarah"; then
-            log_warning "yq installé mais version incorrecte (Python v3 détectée)"
+            log_warning "yq is installed but the version is incorrect (Python v3 detected)"
             log_info "Remplacement par yq v4 (mikefarah)..."
             need_yq=true
         fi
     fi
 
-    # Rien à faire si tout est OK
+    # Nothing to do if everything is already compliant
     if [[ ${#missing_apt[@]} -eq 0 ]] && [[ "$need_yq" == "false" ]]; then
         return 0
     fi
 
     # Installation automatique
-    log_info "Installation automatique des dépendances manquantes..."
+    log_info "Automatically installing missing dependencies..."
 
     # Installer bc et jq via apt
     if [[ ${#missing_apt[@]} -gt 0 ]]; then
         log_info "Installation de ${missing_apt[*]} via apt..."
 
-        # Mode production: bloquer si installation échoue
+        # Production mode: abort if the installation fails
         if [[ "$REQUIRE_DEPENDENCIES" == true ]]; then
-            log_warning "Mode production: installation automatique des dépendances"
+            log_warning "Production mode: automatically installing dependencies"
         fi
 
         # apt avec timeout de 30 secondes
         if ! apt-get -o Acquire::http::Timeout=30 -o Acquire::ftp::Timeout=30 update -qq >/dev/null 2>&1; then
             if [[ "$REQUIRE_DEPENDENCIES" == true ]]; then
-                log_error "apt update échoué (timeout ou réseau inaccessible)"
+                log_error "apt update failed (timeout or network unreachable)"
             else
-                log_warning "apt update échoué, continuant..."
+                log_warning "apt update failed, continuing..."
             fi
         fi
 
         if ! apt-get install -y -qq "${missing_apt[@]}" >/dev/null 2>&1; then
             if [[ "$REQUIRE_DEPENDENCIES" == true ]]; then
-                log_error "Installation ${missing_apt[*]} échouée"
+                log_error "Installation of ${missing_apt[*]} failed"
             else
-                log_warning "Installation ${missing_apt[*]} échouée, continuant..."
+                log_warning "Installation of ${missing_apt[*]} failed, continuant..."
             fi
         fi
 
-        log_success "${missing_apt[*]} installé(s)"
+        log_success "${missing_apt[*]} installed"
     fi
 
     # Installer yq v4
     if [[ "$need_yq" == "true" ]]; then
         log_info "Installation de yq v4 depuis GitHub..."
 
-        # Détecter l'architecture
+        # Detect the architecture
         local arch
         arch=$(uname -m)
         local yq_binary
@@ -342,29 +342,29 @@ install_dependencies() {
                 yq_sha256="4d10a57ff315ba5f7475bb43345f782c38a6cb5253b2b5c45e7de2fb9b7c87f8"
                 ;;
             *)
-                log_error "Architecture non supportée pour yq: $arch"
+                log_error "Unsupported architecture for yq: $arch"
                 ;;
         esac
 
-        # Télécharger yq v4 avec timeout et retries
+        # Download yq v4 with timeout and retries
         local yq_version="v4.44.3"
         local yq_url="https://github.com/mikefarah/yq/releases/download/${yq_version}/${yq_binary}"
 
         if ! wget --timeout=30 --tries=3 -qO /tmp/yq "$yq_url" 2>/dev/null; then
             if [[ "$REQUIRE_DEPENDENCIES" == true ]]; then
-                log_error "Téléchargement yq échoué depuis $yq_url (timeout ou réseau inaccessible)"
+                log_error "Failed to download yq from $yq_url (timeout or unreachable network)"
             else
-                log_warning "Téléchargement yq échoué, continuant..."
+                log_warning "Failed to download yq, continuing..."
                 return 0
             fi
         fi
 
-        # Vérification SHA256 (protection supply chain)
-        log_info "Vérification de l'intégrité de yq (SHA256)..."
+        # Verify the SHA256 checksum (supply chain protection)
+        log_info "Verifying yq integrity (SHA256)..."
         if ! echo "${yq_sha256}  /tmp/yq" | sha256sum -c - >/dev/null 2>&1; then
             rm -f /tmp/yq
             if [[ "$REQUIRE_DEPENDENCIES" == true ]]; then
-                log_error "Checksum SHA256 invalide pour yq ! Supply chain attack possible. Téléchargement refusé."
+                log_error "Invalid SHA256 checksum for yq! Possible supply chain attack. Download rejected."
             else
                 log_warning "Checksum SHA256 invalide pour yq ! Continuant sans yq (mode test)..."
                 return 0
@@ -372,17 +372,17 @@ install_dependencies() {
         fi
 
         chmod +x /tmp/yq
-        mv /tmp/yq /usr/local/bin/yq || log_error "Installation yq échouée (impossible de déplacer vers /usr/local/bin)"
+        mv /tmp/yq /usr/local/bin/yq || log_error "yq installation failed (unable to move binary to /usr/local/bin)"
 
-        log_success "yq $yq_version installé (SHA256 vérifié)"
+        log_success "yq $yq_version installed (SHA256 verified)"
     fi
 }
 
 check_dependencies() {
-    # Installer automatiquement les dépendances manquantes
+    # Automatically install missing dependencies
     install_dependencies
 
-    # Vérifier que tout est bien installé
+    # Ensure everything was installed correctly
     local missing=()
     for cmd in bc jq systemctl yq; do
         if ! command -v "$cmd" &> /dev/null; then
@@ -391,7 +391,7 @@ check_dependencies() {
     done
 
     if [[ ${#missing[@]} -gt 0 ]]; then
-        log_error "Dépendances manquantes après installation: ${missing[*]}"
+        log_error "Missing dependencies after installation: ${missing[*]}"
     fi
 }
 
@@ -400,11 +400,11 @@ validate_positive_integer() {
     local name=$2
 
     if ! [[ "$value" =~ ^[0-9]+$ ]]; then
-        log_error "$name doit être un entier positif (reçu: $value)"
+        log_error "$name must be a positive integer (received: $value)"
     fi
 
     if (( value <= 0 )); then
-        log_error "$name doit être supérieur à 0 (reçu: $value)"
+        log_error "$name must be greater than 0 (received: $value)"
     fi
 }
 
@@ -412,19 +412,19 @@ validate_density_factor() {
     local factor=$1
 
     if ! [[ "$factor" =~ ^[0-9]+\.?[0-9]*$ ]]; then
-        log_error "Le density-factor doit être un nombre valide (reçu: $factor)"
+        log_error "Density-factor must be a valid number (received: $factor)"
     fi
 
     if (( $(echo "$factor < 0.1" | bc -l) )); then
-        log_error "Le density-factor doit être >= 0.1 (reçu: $factor)"
+        log_error "Density-factor must be >= 0.1 (received: $factor)"
     fi
 
     if (( $(echo "$factor > 5.0" | bc -l) )); then
-        log_error "Le density-factor doit être <= 5.0 (reçu: $factor)"
+        log_error "Density-factor must be <= 5.0 (received: $factor)"
     fi
 
     if (( $(echo "$factor < 0.5 || $factor > 3.0" | bc -l) )); then
-        log_warning "Le density-factor $factor est hors de la plage recommandée (0.5-3.0)"
+        log_warning "Density-factor $factor is outside the recommended 0.5-3.0 range"
     fi
 }
 
@@ -433,17 +433,17 @@ validate_calculated_value() {
     local name=$2
     local min=${3:-0}
 
-    # Vérifier que la valeur n'est pas vide
+    # Ensure the value is not empty
     if [[ -z "$value" ]]; then
         log_error "Calcul invalide pour $name: valeur vide"
     fi
 
-    # Vérifier que c'est un nombre entier valide
+    # Ensure it is a valid integer
     if ! [[ "$value" =~ ^[0-9]+$ ]]; then
         log_error "Calcul invalide pour $name: '$value' n'est pas un entier valide"
     fi
 
-    # Vérifier le minimum
+    # Enforce the minimum value
     if (( value < min )); then
         log_error "Calcul invalide pour $name: $value < $min (minimum requis)"
     fi
@@ -456,7 +456,7 @@ validate_profile() {
             return 0
             ;;
         *)
-            log_error "Profil invalide: $profile. Valeurs acceptées: gke, eks, conservative, minimal"
+            log_error "Invalid profile: $profile. Accepted values: gke, eks, conservative, minimal"
             ;;
     esac
 }
@@ -468,24 +468,24 @@ validate_node_type() {
             return 0
             ;;
         *)
-            log_error "Type de nœud invalide: $node_type. Valeurs acceptées: control-plane, worker, auto"
+            log_error "Invalid node type: $node_type. Accepted values: control-plane, worker, auto"
             ;;
     esac
 }
 
 ################################################################################
-# Détection du type de nœud (control-plane vs worker)
+# Node type detection (control-plane vs worker)
 ################################################################################
 
 detect_node_type() {
-    log_info "Détection du type de nœud..."
+    log_info "Detecting node type..."
 
-    # Vérifier la présence de static pods control-plane dans /etc/kubernetes/manifests
+    # Look for control-plane static pods under /etc/kubernetes/manifests
     local manifests_dir="/etc/kubernetes/manifests"
     local is_control_plane=false
 
     if [[ -d "$manifests_dir" ]]; then
-        # Vérifier la présence des manifestes des composants control-plane
+        # Check for control-plane component manifests
         if [[ -f "$manifests_dir/kube-apiserver.yaml" ]] || \
            [[ -f "$manifests_dir/kube-controller-manager.yaml" ]] || \
            [[ -f "$manifests_dir/kube-scheduler.yaml" ]] || \
@@ -496,11 +496,11 @@ detect_node_type() {
 
     if [[ "$is_control_plane" == true ]]; then
         NODE_TYPE_DETECTED="control-plane"
-        log_success "Nœud détecté: CONTROL-PLANE (static pods détectés dans $manifests_dir)"
-        log_warning "Mode control-plane: kube-reserved ne sera PAS enforced (pour préserver les static pods critiques)"
+        log_success "Node detected: CONTROL-PLANE (static pods found in $manifests_dir)"
+        log_warning "Control-plane mode: kube-reserved will NOT be enforced (critical static pods preserved)"
     else
         NODE_TYPE_DETECTED="worker"
-        log_success "Nœud détecté: WORKER (aucun static pod control-plane trouvé)"
+        log_success "Node detected: WORKER (no control-plane static pods found)"
         log_info "Mode worker: kube-reserved sera enforced normalement"
     fi
 
@@ -508,7 +508,7 @@ detect_node_type() {
 }
 
 ################################################################################
-# Détection des ressources système
+# System resource detection
 ################################################################################
 
 detect_vcpu() {
@@ -516,26 +516,26 @@ detect_vcpu() {
     vcpu=$(nproc)
 
     if (( vcpu <= 0 )); then
-        log_error "Impossible de détecter le nombre de vCPU"
+        log_error "Unable to detect vCPU count"
     fi
 
     echo "$vcpu"
 }
 
 detect_ram_gib() {
-    # Retourne la RAM totale en GiB (calculé depuis MiB pour plus de précision)
+    # Return total RAM in GiB (computed from MiB for accuracy)
     local ram_mib
     ram_mib=$(detect_ram_mib)
     echo "scale=2; $ram_mib / 1024" | bc
 }
 
 detect_ram_mib() {
-    # Retourne la RAM totale en MiB (précis)
+    # Return total RAM in MiB (exact)
     local ram_mib
     ram_mib=$(free -m | awk '/^Mem:/ {print $2}')
 
     if (( ram_mib <= 0 )); then
-        log_error "Impossible de détecter la RAM système"
+        log_error "Unable to detect system memory"
     fi
 
     echo "$ram_mib"
@@ -550,7 +550,7 @@ detect_ephemeral_capacity_mib() {
 
     local df_output
     if ! df_output=$(df -BM "$path" 2>/dev/null); then
-        log_warning "Impossible de détecter la capacité de stockage éphémère (df échoue sur $path)"
+        log_warning "Unable to detect ephemeral storage capacity (df failed on $path)"
         echo "0"
         return
     fi
@@ -559,13 +559,13 @@ detect_ephemeral_capacity_mib() {
     size_mb=$(awk 'NR==2 {print $2}' <<< "$df_output" | tr -d 'M')
 
     if [[ -z "$size_mb" ]]; then
-        log_warning "Capacité de stockage éphémère introuvable (df vide sur $path)"
+        log_warning "Ephemeral storage capacity not found (df output empty on $path)"
         echo "0"
         return
     fi
 
     if ! [[ "$size_mb" =~ ^[0-9]+$ ]]; then
-        log_warning "Valeur de capacité éphémère invalide: $size_mb"
+        log_warning "Invalid ephemeral capacity value: $size_mb"
         echo "0"
         return
     fi
@@ -639,7 +639,7 @@ calculate_ephemeral_reservations() {
             fi
         fi
     else
-        log_warning "Capacité de stockage éphémère introuvable, utilisation des valeurs par défaut (10Gi / 5Gi)"
+        log_warning "Ephemeral storage capacity missing, using defaults (10Gi / 5Gi)"
     fi
 
     echo "$system_mib $kube_mib"
@@ -657,7 +657,7 @@ calculate_density_factor() {
     validate_positive_integer "$target_pods" "target-pods"
 
     if (( target_pods > 500 )); then
-        log_warning "target-pods très élevé ($target_pods). Maximum recommandé: 500"
+        log_warning "target-pods is very high ($target_pods). Recommended maximum: 500"
     fi
 
     if (( target_pods <= 30 )); then
@@ -675,7 +675,7 @@ calculate_density_factor() {
         # Croissance logarithmique
         local excess=$(( target_pods - 110 ))
         if (( excess > 90 )); then
-            excess=90  # Cap à 200 pods total
+            excess=90  # Cap at 200 pods total
         fi
         factor=$(echo "scale=2; 1.5 + ($excess / 180.0)" | bc)
     fi
@@ -684,7 +684,7 @@ calculate_density_factor() {
 }
 
 ################################################################################
-# Formules de calcul des réservations
+# Reservation calculation formulas
 ################################################################################
 
 # Profil GKE (Google Kubernetes Engine)
@@ -693,7 +693,7 @@ calculate_gke() {
     local ram_gib=$2
     local ram_mib=$3
 
-    # Normaliser ram_gib en entier pour calculs arithmétiques bash
+    # Normalize ram_gib to an integer for bash arithmetic
     local ram_gib_int
     ram_gib_int=$(printf "%.0f" "$ram_gib")
 
@@ -747,7 +747,7 @@ calculate_eks() {
     local ram_gib=$2
     local ram_mib=$3
 
-    # Normaliser ram_gib en entier pour calculs arithmétiques bash
+    # Normalize ram_gib to an integer for bash arithmetic
     local ram_gib_int
     ram_gib_int=$(printf "%.0f" "$ram_gib")
 
@@ -816,7 +816,7 @@ calculate_minimal() {
     local ram_gib=$2
     local ram_mib=$3
 
-    # Normaliser ram_gib en entier pour calculs arithmétiques bash
+    # Normalize ram_gib to an integer for bash arithmetic
     local ram_gib_int
     ram_gib_int=$(printf "%.0f" "$ram_gib")
 
@@ -851,7 +851,7 @@ apply_density_factor() {
     local kube_mem=$4
     local factor=$5
 
-    # Appliquer le facteur et forcer la conversion en entier (sans décimales)
+    # Apply the factor and force integer conversion (no decimals)
     sys_cpu=$(printf "%.0f" "$(echo "$sys_cpu * $factor" | bc)")
     sys_mem=$(printf "%.0f" "$(echo "$sys_mem * $factor" | bc)")
     kube_cpu=$(printf "%.0f" "$(echo "$kube_cpu * $factor" | bc)")
@@ -861,38 +861,38 @@ apply_density_factor() {
 }
 
 ################################################################################
-# Vérification et création des cgroups
+# Cgroup verification and creation
 ################################################################################
 
 ensure_cgroups() {
-    log_info "Vérification des cgroups requis..."
+    log_info "Checking required cgroups..."
 
-    # Détecter la version de cgroup
+    # Detect the cgroup version
     local cgroup_version
     if [[ -f /sys/fs/cgroup/cgroup.controllers ]]; then
         cgroup_version="v2"
-        log_info "Système cgroup v2 détecté"
+        log_info "cgroup v2 system detected"
     else
         cgroup_version="v1"
-        log_info "Système cgroup v1 détecté"
+        log_info "cgroup v1 system detected"
     fi
 
     # Pour cgroup v2
     if [[ "$cgroup_version" == "v2" ]]; then
-        # Vérifier system.slice
+        # Check system.slice
         if [[ ! -d /sys/fs/cgroup/system.slice ]]; then
-            log_warning "Cgroup /system.slice n'existe pas, il sera créé par systemd"
+            log_warning "Cgroup /system.slice does not exist, systemd will create it"
         else
             log_success "Cgroup /system.slice existe"
         fi
 
-        # Vérifier kubelet.slice
+        # Check kubelet.slice
         if [[ ! -d /sys/fs/cgroup/kubelet.slice ]]; then
-            log_info "Création du cgroup /kubelet.slice..."
+            log_info "Creating /kubelet.slice cgroup..."
             if systemctl cat kubelet.slice &>/dev/null; then
-                log_success "kubelet.slice déjà configuré dans systemd"
+                log_success "kubelet.slice already configured in systemd"
             else
-                log_warning "kubelet.slice n'existe pas. Création d'une unit systemd..."
+                log_warning "kubelet.slice does not exist. Creating a systemd unit..."
                 cat > /etc/systemd/system/kubelet.slice <<'EOF'
 [Unit]
 Description=Kubelet Slice
@@ -903,58 +903,58 @@ CPUAccounting=yes
 MemoryAccounting=yes
 EOF
                 systemctl daemon-reload
-                log_success "kubelet.slice créé (systemd montera la slice à la demande)"
+                log_success "kubelet.slice created (systemd will mount the slice on demand)"
             fi
         else
             log_success "Cgroup /kubelet.slice existe"
         fi
     else
         # Pour cgroup v1
-        log_warning "Cgroup v1 détecté. Assurez-vous que les cgroups sont configurés manuellement si nécessaire."
+        log_warning "cgroup v1 detected. Configure cgroups manually if needed."
     fi
 }
 
 ################################################################################
-# Attachement du service kubelet à kubelet.slice
+# Attaching kubelet.service to kubelet.slice
 ################################################################################
 
 ensure_kubelet_slice_attachment() {
-    log_info "Vérification de l'attachement du service kubelet à kubelet.slice..."
+    log_info "Checking kubelet service attachment to kubelet.slice..."
 
-    # Vérifier si kubelet.service existe
+    # Check whether kubelet.service exists
     if ! systemctl cat kubelet.service &>/dev/null; then
-        log_warning "Le service kubelet.service n'existe pas encore sur ce système"
-        log_warning "L'attachement à kubelet.slice devra être configuré manuellement après installation de kubelet"
+        log_warning "The kubelet.service unit does not exist on this system yet"
+        log_warning "Attachment to kubelet.slice must be configured manually after kubelet installation"
         return 0
     fi
 
-    # Vérifier l'attachement actuel du service kubelet
+    # Check the current slice used by kubelet.service
     local current_slice
     current_slice=$(systemctl show kubelet.service -p Slice --value 2>/dev/null)
 
     if [[ "$current_slice" == "kubelet.slice" ]]; then
-        log_success "Service kubelet déjà attaché à kubelet.slice"
+        log_success "kubelet service already attached to kubelet.slice"
         return 0
     fi
 
     # Le kubelet n'est pas dans la bonne slice
     log_warning "Service kubelet actuellement dans : ${current_slice:-system.slice}"
-    log_info "Configuration de l'attachement à kubelet.slice..."
+    log_info "Configuring attachment to kubelet.slice..."
 
-    # Créer le répertoire drop-in si nécessaire
+    # Create the drop-in directory if required
     local dropin_dir="/etc/systemd/system/kubelet.service.d"
     mkdir -p "$dropin_dir"
 
-    # Créer le drop-in pour attacher kubelet à kubelet.slice
+    # Create the drop-in to attach kubelet to kubelet.slice
     local dropin_file="${dropin_dir}/11-kubelet-slice.conf"
 
     cat > "$dropin_file" <<'EOF'
-# Configuration automatique des réservations kubelet
-# Attache le service kubelet à kubelet.slice pour l'enforcement de kube-reserved
-# Généré automatiquement par kubelet_auto_config.sh
+# Automatic kubelet reservation configuration
+# Attach kubelet.service to kubelet.slice to enforce kube-reserved
+# Generated automatically by kubelet_auto_config.sh
 
 [Unit]
-# S'assurer que la slice existe avant de démarrer kubelet
+# Ensure the slice exists before starting kubelet
 After=kubelet.slice
 Requires=kubelet.slice
 
@@ -963,21 +963,21 @@ Requires=kubelet.slice
 Slice=kubelet.slice
 EOF
 
-    log_success "Drop-in systemd créé : $dropin_file"
+    log_success "systemd drop-in created: $dropin_file"
 
     # Recharger la configuration systemd
     log_info "Rechargement de la configuration systemd..."
     systemctl daemon-reload
 
-    # Vérifier que le changement est pris en compte
+    # Ensure the change is applied
     local new_slice
     new_slice=$(systemctl show kubelet.service -p Slice --value 2>/dev/null)
 
     if [[ "$new_slice" == "kubelet.slice" ]]; then
-        log_success "Service kubelet configuré pour s'attacher à kubelet.slice"
-        log_info "  → Le changement prendra effet au prochain redémarrage du kubelet"
+        log_success "kubelet service configured to attach to kubelet.slice"
+        log_info "  → Change will take effect after the next kubelet restart"
     else
-        log_error "Échec de la configuration de l'attachement (slice détectée: $new_slice)"
+        log_error "Failed to configure attachment (detected slice: $new_slice)"
     fi
 }
 
@@ -986,22 +986,22 @@ EOF
 ################################################################################
 
 validate_kubelet_slice_attachment() {
-    log_info "Validation de l'attachement effectif du kubelet à kubelet.slice..."
+    log_info "Validating kubelet attachment to kubelet.slice..."
 
-    # Attendre un peu que le kubelet démarre complètement
+    # Wait for the kubelet to fully start
     sleep 3
 
-    # Vérifier le slice effectif via systemctl
+    # Check the effective slice via systemctl
     local effective_slice
     effective_slice=$(systemctl show kubelet.service -p Slice --value 2>/dev/null)
 
     if [[ "$effective_slice" == "kubelet.slice" ]]; then
-        log_success "✓ Service kubelet correctement attaché à kubelet.slice"
+        log_success "✓ kubelet service properly attached to kubelet.slice"
     else
-        log_error $'✗ Service kubelet PAS dans kubelet.slice (détecté: '"${effective_slice:-N/A}"$')\n  → kube-reserved ne sera PAS appliqué au kubelet lui-même!\n  → Vérifiez : systemctl status kubelet | grep Cgroup'
+        log_error $'✗ kubelet service NOT in kubelet.slice (detected: '"${effective_slice:-N/A}"$')\n  → kube-reserved will NOT be enforced on the kubelet itself!\n  → Check: systemctl status kubelet | grep Cgroup'
     fi
 
-    # Vérifier via le cgroup réel du processus kubelet
+    # Check the real kubelet process cgroup
     local kubelet_pid
     kubelet_pid=$(systemctl show kubelet.service -p MainPID --value 2>/dev/null)
 
@@ -1018,13 +1018,13 @@ validate_kubelet_slice_attachment() {
                 kubelet_cgroup=$(grep -E '^[0-9]+:(cpu|memory):' "/proc/$kubelet_pid/cgroup" 2>/dev/null | head -n1 | cut -d: -f3)
             fi
 
-            # Vérification
+            # Verification
             if [[ -n "$kubelet_cgroup" ]]; then
                 if echo "$kubelet_cgroup" | grep -q "kubelet.slice"; then
-                    log_success "✓ Processus kubelet (PID $kubelet_pid) dans le bon cgroup"
+                    log_success "✓ Kubelet process (PID $kubelet_pid) is in the correct cgroup"
                     log_info "  → Cgroup: $kubelet_cgroup"
                 else
-                    log_warning "✗ Processus kubelet dans un cgroup inattendu: $kubelet_cgroup"
+                    log_warning "✗ Kubelet process is in an unexpected cgroup: $kubelet_cgroup"
                 fi
             else
                 log_warning "Impossible de parser le cgroup du kubelet (format inattendu)"
@@ -1038,7 +1038,7 @@ validate_kubelet_slice_attachment() {
 }
 
 ################################################################################
-# Calcul des seuils d'éviction dynamiques
+# Dynamic eviction threshold calculation
 ################################################################################
 
 calculate_eviction_thresholds() {
@@ -1073,7 +1073,7 @@ calculate_eviction_thresholds() {
 }
 
 ################################################################################
-# Génération de la configuration kubelet
+# Kubelet configuration generation
 ################################################################################
 
 generate_kubelet_config_from_scratch() {
@@ -1090,7 +1090,7 @@ generate_kubelet_config_from_scratch() {
 
     local system_ephemeral_mib kube_ephemeral_mib
     read -r system_ephemeral_mib kube_ephemeral_mib <<< "$(calculate_ephemeral_reservations)"
-    log_info "Réservations éphémères calculées: system=${system_ephemeral_mib}Mi, kube=${kube_ephemeral_mib}Mi"
+    log_info "Computed ephemeral reservations: system=${system_ephemeral_mib}Mi, kube=${kube_ephemeral_mib}Mi"
 
     # Adapter enforceNodeAllocatable selon le type de nœud
     local enforce_list
@@ -1104,7 +1104,7 @@ generate_kubelet_config_from_scratch() {
     fi
 
     cat <<EOF
-# Configuration générée automatiquement le $(date)
+# Configuration automatically generated on $(date)
 # Profil: $PROFILE | Density-factor: $DENSITY_FACTOR | Type: $node_type
 # Nœud: ${vcpu} vCPU / ${ram_gib} GiB RAM
 
@@ -1112,7 +1112,7 @@ apiVersion: kubelet.config.k8s.io/v1beta1
 kind: KubeletConfiguration
 
 # ============================================================
-# RÉSERVATIONS SYSTÈME ET KUBERNETES
+# SYSTEM AND KUBE RESERVATIONS
 # ============================================================
 systemReserved:
   cpu: "${sys_cpu}m"
@@ -1125,10 +1125,10 @@ kubeReserved:
   ephemeral-storage: "${kube_ephemeral_mib}Mi"
 
 # ============================================================
-# ENFORCEMENT DES RÉSERVATIONS
+# RESERVATION ENFORCEMENT
 # ============================================================
 # Type de nœud: $node_type
-# $(if [[ "$node_type" == "control-plane" ]]; then echo "kube-reserved NON enforced (préserve les static pods critiques)"; else echo "kube-reserved enforced (worker node)"; fi)
+# $(if [[ "$node_type" == "control-plane" ]]; then echo "kube-reserved NOT enforced (preserves critical static pods)"; else echo "kube-reserved enforced (worker node)"; fi)
 enforceNodeAllocatable:
 $enforce_list
 
@@ -1139,7 +1139,7 @@ systemReservedCgroup: "/system.slice"
 kubeReservedCgroup: "/kubelet.slice"
 
 # ============================================================
-# SEUILS D'ÉVICTION (dynamiques selon la taille du nœud)
+# EVICTION THRESHOLDS (dynamic based on node size)
 # ============================================================
 evictionHard:
   memory.available: "${eviction_hard_mem}"
@@ -1192,29 +1192,29 @@ generate_kubelet_config() {
     local output_file=$8
     local node_type=$9
 
-    # Calcul des seuils d'éviction
+    # Calculate eviction thresholds
     read -r eviction_hard_mem eviction_soft_mem <<< $(calculate_eviction_thresholds "$ram_gib" "$ram_mib")
 
     local system_ephemeral_mib kube_ephemeral_mib
     read -r system_ephemeral_mib kube_ephemeral_mib <<< "$(calculate_ephemeral_reservations)"
-    log_info "Réservations éphémères calculées: system=${system_ephemeral_mib}Mi, kube=${kube_ephemeral_mib}Mi"
+    log_info "Computed ephemeral reservations: system=${system_ephemeral_mib}Mi, kube=${kube_ephemeral_mib}Mi"
 
     # Si le fichier de config kubelet existe, merger avec l'existant
     if [[ -f "$KUBELET_CONFIG" ]]; then
-        log_info "Fusion avec la configuration existante (préservation des tweaks personnalisés)..."
+        log_info "Merging with existing configuration (preserving custom tweaks)..."
 
         # Copier l'existant comme base
         cp "$KUBELET_CONFIG" "$output_file"
 
-        # Ajouter un commentaire de traçabilité en haut du fichier
-        local header_comment="# Mis à jour automatiquement le $(date) - Profil: $PROFILE | Density-factor: $DENSITY_FACTOR | Type: $node_type"
+        # Add a traceability comment at the top of the file
+        local header_comment="# Automatically updated on $(date) - Profile: $PROFILE | Density-factor: $DENSITY_FACTOR | Type: $node_type"
         sed -i.tmp "1i\\
 $header_comment
 " "$output_file"
         rm -f "${output_file}.tmp"
 
-        # Modifier UNIQUEMENT les champs gérés par ce script avec yq
-        log_info "Mise à jour des réservations système et Kubernetes..."
+        # Modify ONLY the fields managed by this script with yq
+        log_info "Updating system and kube reservations..."
 
         # systemReserved
         yq eval -i ".systemReserved.cpu = \"${sys_cpu}m\"" "$output_file"
@@ -1228,7 +1228,7 @@ $header_comment
 
         # enforceNodeAllocatable (adapter selon le type de nœud)
         if [[ "$node_type" == "control-plane" ]]; then
-            log_warning "Mode control-plane: enforcement de kube-reserved désactivé"
+            log_warning "Control-plane mode: kube-reserved enforcement disabled"
             yq eval -i '.enforceNodeAllocatable = ["pods", "system-reserved"]' "$output_file"
         else
             log_info "Mode worker: enforcement complet (pods, system-reserved, kube-reserved)"
@@ -1241,7 +1241,7 @@ $header_comment
         yq eval -i '.systemReservedCgroup = "/system.slice"' "$output_file"
         yq eval -i '.kubeReservedCgroup = "/kubelet.slice"' "$output_file"
 
-        # Seuils d'éviction
+        # Eviction thresholds
         yq eval -i ".evictionHard.\"memory.available\" = \"${eviction_hard_mem}\"" "$output_file"
         yq eval -i '.evictionHard."nodefs.available" = "10%"' "$output_file"
         yq eval -i '.evictionHard."nodefs.inodesFree" = "5%"' "$output_file"
@@ -1261,12 +1261,12 @@ $header_comment
         yq eval -i '.evictionMinimumReclaim."nodefs.available" = "500Mi"' "$output_file"
         yq eval -i '.evictionMinimumReclaim."imagefs.available" = "2Gi"' "$output_file"
 
-        log_success "Configuration fusionnée : tweaks existants préservés"
+        log_success "Configuration merged: existing tweaks preserved"
 
     else
-        log_info "Aucune configuration existante, génération d'une configuration complète..."
+        log_info "No existing configuration detected, generating a full config..."
 
-        # Générer une config complète depuis zéro
+        # Generate a complete config from scratch
         generate_kubelet_config_from_scratch "$sys_cpu" "$sys_mem" "$kube_cpu" "$kube_mem" \
             "$vcpu" "$ram_gib" "$ram_mib" "$eviction_hard_mem" "$eviction_soft_mem" "$node_type" > "$output_file"
     fi
@@ -1282,10 +1282,10 @@ validate_yaml() {
     log_info "Validation de la configuration YAML..."
 
     if ! yq eval '.' "$config_file" > /dev/null 2>&1; then
-        log_error "La configuration générée n'est pas un YAML valide"
+        log_error "Generated configuration is not valid YAML"
     fi
 
-    # Vérifications supplémentaires
+    # Additional checks
     local api_version
     api_version=$(yq eval '.apiVersion' "$config_file" 2>/dev/null)
     if [[ "$api_version" != "kubelet.config.k8s.io/v1beta1" ]]; then
@@ -1298,11 +1298,11 @@ validate_yaml() {
         log_error "kind invalide dans la configuration: $kind"
     fi
 
-    log_success "Configuration YAML validée"
+    log_success "YAML configuration validated"
 }
 
 ################################################################################
-# Affichage du résumé
+# Summary display
 ################################################################################
 
 display_summary() {
@@ -1323,10 +1323,10 @@ display_summary() {
 
     echo ""
     echo "═══════════════════════════════════════════════════════════════════════════"
-    echo "  CONFIGURATION KUBELET - RÉSERVATIONS CALCULÉES"
+    echo "  KUBELET CONFIGURATION - CALCULATED RESERVATIONS"
     echo "═══════════════════════════════════════════════════════════════════════════"
     echo ""
-    echo "Configuration nœud:"
+    echo "Node configuration:"
     echo "  vCPU:              $vcpu"
     echo "  RAM:               $ram_gib GiB"
     echo "  Type:              $node_type"
@@ -1334,30 +1334,30 @@ display_summary() {
     echo "  Density-factor:    $DENSITY_FACTOR"
     echo ""
     echo "───────────────────────────────────────────────────────────────────────────"
-    echo "Réservations:"
+    echo "Reservations:"
     echo "───────────────────────────────────────────────────────────────────────────"
     echo ""
     echo "  system-reserved:"
     echo "    CPU:             ${sys_cpu}m"
-    echo "    Mémoire:         ${sys_mem} MiB ($(echo "scale=2; $sys_mem / 1024" | bc) GiB)"
+    echo "    Memory:           ${sys_mem} MiB ($(echo "scale=2; $sys_mem / 1024" | bc) GiB)"
     echo ""
     echo "  kube-reserved:"
     echo "    CPU:             ${kube_cpu}m"
-    echo "    Mémoire:         ${kube_mem} MiB ($(echo "scale=2; $kube_mem / 1024" | bc) GiB)"
+    echo "    Memory:           ${kube_mem} MiB ($(echo "scale=2; $kube_mem / 1024" | bc) GiB)"
     echo ""
     echo "───────────────────────────────────────────────────────────────────────────"
     echo "Totaux:"
     echo "───────────────────────────────────────────────────────────────────────────"
     echo ""
-    echo "  CPU réservé:       ${total_cpu}m (${cpu_percent}%)"
-    echo "  Mémoire réservée:  ${total_mem} MiB (${mem_percent}%)"
+    echo "  Reserved CPU:       ${total_cpu}m (${cpu_percent}%)"
+    echo "  Reserved memory:    ${total_mem} MiB (${mem_percent}%)"
     echo ""
     echo "───────────────────────────────────────────────────────────────────────────"
-    echo "Allocatable (capacité disponible pour les pods):"
+    echo "Allocatable (available capacity for pods):"
     echo "───────────────────────────────────────────────────────────────────────────"
     echo ""
     echo "  CPU:               ${alloc_cpu}m (sur $((vcpu * 1000))m)"
-    echo "  Mémoire:           ${alloc_mem} GiB (sur ${ram_gib} GiB)"
+    echo "  Memory:             ${alloc_mem} GiB (out of ${ram_gib} GiB)"
     echo ""
     echo "═══════════════════════════════════════════════════════════════════════════"
     echo ""
@@ -1390,7 +1390,7 @@ main() {
             --wait-timeout)
                 KUBELET_WAIT_TIMEOUT="$2"
                 if ! [[ "$KUBELET_WAIT_TIMEOUT" =~ ^[0-9]+$ ]]; then
-                    log_error "--wait-timeout doit être un entier positif (reçu: $KUBELET_WAIT_TIMEOUT)"
+                    log_error "--wait-timeout must be a positive integer (received: $KUBELET_WAIT_TIMEOUT)"
                 fi
                 shift 2
                 ;;
@@ -1404,7 +1404,7 @@ main() {
                 ;;
             --no-require-deps)
                 REQUIRE_DEPENDENCIES=false
-                log_warning "Mode strict dépendances désactivé (non recommandé en production)"
+                log_warning "Strict dependency mode disabled (not recommended in production)"
                 shift
                 ;;
             --help)
@@ -1416,7 +1416,7 @@ main() {
         esac
     done
 
-    # Vérifications système
+    # System checks
     check_root
     check_os
     acquire_lock
@@ -1427,48 +1427,48 @@ main() {
     if [[ -n "$pre_alloc_snapshot" ]]; then
         local pre_cpu_m=${pre_alloc_snapshot%%:*}
         local pre_mem_mi=${pre_alloc_snapshot##*:}
-        log_info "Allocatable actuel -> CPU: ${pre_cpu_m}m | Mémoire: ${pre_mem_mi}Mi"
+        log_info "Current allocatable -> CPU: ${pre_cpu_m}m | Memory: ${pre_mem_mi}Mi"
     fi
 
-    # Validation des entrées
+    # Input validation
     validate_profile "$PROFILE"
     validate_node_type "$NODE_TYPE"
     validate_density_factor "$DENSITY_FACTOR"
 
-    # Détection des ressources
-    log_info "Détection des ressources système..."
+    # Resource detection
+    log_info "Detecting system resources..."
     VCPU=$(detect_vcpu)
     RAM_MIB=$(detect_ram_mib)
     RAM_GIB=$(detect_ram_gib)
 
-    log_success "Détecté: ${VCPU} vCPU, ${RAM_GIB} GiB RAM (${RAM_MIB} MiB)"
+    log_success "Detected: ${VCPU} vCPU, ${RAM_GIB} GiB RAM (${RAM_MIB} MiB)"
 
-    # Détection du type de nœud (control-plane vs worker)
+    # Node type detection (control-plane vs worker)
     if [[ "$NODE_TYPE" == "auto" ]]; then
         NODE_TYPE_DETECTED=$(detect_node_type)
     else
         NODE_TYPE_DETECTED="$NODE_TYPE"
-        log_info "Type de nœud forcé manuellement: $NODE_TYPE_DETECTED"
+        log_info "Node type manually forced: $NODE_TYPE_DETECTED"
     fi
 
     if [[ "$NODE_TYPE_DETECTED" == "control-plane" ]]; then
         if (( $(echo "$DENSITY_FACTOR > $CONTROL_PLANE_MAX_DENSITY" | bc -l) )); then
-            log_warning "Density-factor $DENSITY_FACTOR trop élevé pour un control-plane. Limite appliquée: $CONTROL_PLANE_MAX_DENSITY"
+            log_warning "Density-factor $DENSITY_FACTOR is too high for a control-plane. Applying limit: $CONTROL_PLANE_MAX_DENSITY"
             DENSITY_FACTOR=$CONTROL_PLANE_MAX_DENSITY
         fi
     fi
 
-    # Calcul automatique du density-factor si target-pods spécifié
+    # Automatically compute density factor when target-pods is set
     if [[ -n "$TARGET_PODS" ]]; then
         log_info "Calcul automatique du density-factor pour $TARGET_PODS pods cible..."
         DENSITY_FACTOR=$(calculate_density_factor "$TARGET_PODS")
-        log_success "Density-factor calculé: $DENSITY_FACTOR"
+        log_success "Density-factor computed: $DENSITY_FACTOR"
     fi
 
-    # Calcul des réservations selon le profil
-    log_info "Calcul des réservations avec profil '$PROFILE'..."
+    # Compute reservations according to the profile
+    log_info "Calculating reservations with profile '$PROFILE'..."
 
-    # Note: RAM_GIB peut être une décimale maintenant, on doit l'arrondir pour les calculs
+    # Note: RAM_GIB may now be decimal, so round it for arithmetic
     RAM_GIB_INT=$(echo "$RAM_GIB" | cut -d. -f1)
 
     # Validation de RAM_GIB_INT avec fallback
@@ -1492,7 +1492,7 @@ main() {
             ;;
     esac
 
-    # Validation des valeurs calculées
+    # Validate calculated values
     validate_calculated_value "$SYS_CPU" "system-reserved CPU" 50
     validate_calculated_value "$SYS_MEM" "system-reserved Memory" 100
     validate_calculated_value "$KUBE_CPU" "kube-reserved CPU" 50
@@ -1503,34 +1503,34 @@ main() {
         log_info "Application du density-factor ${DENSITY_FACTOR}..."
         read -r SYS_CPU SYS_MEM KUBE_CPU KUBE_MEM <<< $(apply_density_factor "$SYS_CPU" "$SYS_MEM" "$KUBE_CPU" "$KUBE_MEM" "$DENSITY_FACTOR")
 
-        # Re-validation après application du facteur
-        validate_calculated_value "$SYS_CPU" "system-reserved CPU (après facteur)" 50
-        validate_calculated_value "$SYS_MEM" "system-reserved Memory (après facteur)" 100
-        validate_calculated_value "$KUBE_CPU" "kube-reserved CPU (après facteur)" 50
-        validate_calculated_value "$KUBE_MEM" "kube-reserved Memory (après facteur)" 100
+        # Re-validate after applying the factor
+        validate_calculated_value "$SYS_CPU" "system-reserved CPU (after factor)" 50
+        validate_calculated_value "$SYS_MEM" "system-reserved Memory (after factor)" 100
+        validate_calculated_value "$KUBE_CPU" "kube-reserved CPU (after factor)" 50
+        validate_calculated_value "$KUBE_MEM" "kube-reserved Memory (after factor)" 100
     fi
 
-    # Validation: s'assurer que l'allocatable n'est pas négatif
+    # Validate that the allocatable value is not negative
     local total_cpu_reserved=$((SYS_CPU + KUBE_CPU))
     local total_mem_reserved=$((SYS_MEM + KUBE_MEM))
     local total_cpu_capacity=$((VCPU * 1000))
     local total_mem_capacity=$(echo "scale=0; $RAM_GIB * 1024" | bc | cut -d. -f1)
 
     if (( total_cpu_reserved >= total_cpu_capacity )); then
-        log_error "Réservations CPU totales ($total_cpu_reserved m) >= Capacité CPU ($total_cpu_capacity m)! Réduisez le density-factor."
+        log_error "Total CPU reservations ($total_cpu_reserved m) >= CPU capacity ($total_cpu_capacity m)! Reduce the density factor."
     fi
 
     if (( total_mem_reserved >= total_mem_capacity )); then
-        log_error "Réservations mémoire totales ($total_mem_reserved Mi) >= Capacité mémoire ($total_mem_capacity Mi)! Réduisez le density-factor."
+        log_error "Total memory reservations ($total_mem_reserved Mi) >= memory capacity ($total_mem_capacity Mi)! Reduce the density factor."
     fi
 
-    # Calcul des allocatable estimés et des pourcentages restants
+    # Compute estimated allocatable values and remaining percentages
     local alloc_cpu_milli=$((total_cpu_capacity - total_cpu_reserved))
     local alloc_mem_mib=$((total_mem_capacity - total_mem_reserved))
     local cpu_alloc_percent=$(echo "scale=2; ($alloc_cpu_milli / $total_cpu_capacity) * 100" | bc)
     local mem_alloc_percent=$(echo "scale=2; ($alloc_mem_mib / $total_mem_capacity) * 100" | bc)
 
-    # Afficher la variation estimée par rapport à l'état initial (si récupérable)
+    # Display the estimated variation versus the initial state (if available)
     if [[ -n "$pre_alloc_snapshot" ]]; then
         local pre_cpu_m=${pre_alloc_snapshot%%:*}
         local pre_mem_mi=${pre_alloc_snapshot##*:}
@@ -1540,18 +1540,18 @@ main() {
         local mem_diff_fmt
         cpu_diff_fmt=$(format_diff "$cpu_diff")
         mem_diff_fmt=$(format_diff "$mem_diff")
-        log_info "Allocatable estimé -> CPU: ${alloc_cpu_milli}m (${cpu_diff_fmt}m) | Mémoire: ${alloc_mem_mib}Mi (${mem_diff_fmt}Mi)"
+        log_info "Estimated allocatable -> CPU: ${alloc_cpu_milli}m (${cpu_diff_fmt}m) | Memory: ${alloc_mem_mib}Mi (${mem_diff_fmt}Mi)"
     else
-        log_info "Allocatable estimé -> CPU: ${alloc_cpu_milli}m | Mémoire: ${alloc_mem_mib}Mi"
+        log_info "Estimated allocatable -> CPU: ${alloc_cpu_milli}m | Memory: ${alloc_mem_mib}Mi"
     fi
 
-    # Avertissements préventifs
+    # Preventive warnings
     if (( $(echo "$cpu_alloc_percent < 10" | bc -l) )); then
-        log_warning "Allocatable CPU très faible: ${cpu_alloc_percent}% (< 10% de la capacité)"
+        log_warning "Allocatable CPU critically low: ${cpu_alloc_percent}% (< 10% of capacity)"
     fi
 
     if (( $(echo "$mem_alloc_percent < 10" | bc -l) )); then
-        log_warning "Allocatable mémoire très faible: ${mem_alloc_percent}% (< 10% de la capacité)"
+        log_warning "Allocatable memory critically low: ${mem_alloc_percent}% (< 10% of capacity)"
     fi
 
     # Garde-fous stricts
@@ -1563,22 +1563,22 @@ main() {
     fi
 
     if (( $(echo "$cpu_alloc_percent < $min_cpu_percent" | bc -l) )); then
-        log_error "Allocatable CPU tomberait à ${cpu_alloc_percent}% (< ${min_cpu_percent}%). Réduisez le density-factor ou choisissez un profil plus léger."
+        log_error "Allocatable CPU would drop to ${cpu_alloc_percent}% (< ${min_cpu_percent}%). Reduce the density factor or use a lighter profile."
     fi
 
     if (( $(echo "$mem_alloc_percent < $min_mem_percent" | bc -l) )); then
-        log_error "Allocatable mémoire tomberait à ${mem_alloc_percent}% (< ${min_mem_percent}%). Réduisez le density-factor ou choisissez un profil plus léger."
+        log_error "Allocatable memory would drop to ${mem_alloc_percent}% (< ${min_mem_percent}%). Reduce the density factor or use a lighter profile."
     fi
 
-    # Affichage du résumé
+    # Summary display
     display_summary "$VCPU" "$RAM_GIB" "$SYS_CPU" "$SYS_MEM" "$KUBE_CPU" "$KUBE_MEM" "$NODE_TYPE_DETECTED"
 
     # Mode dry-run : afficher la config sans appliquer
     if [[ "$DRY_RUN" == true ]]; then
-        log_warning "Mode DRY-RUN activé - Configuration non appliquée"
+        log_warning "DRY-RUN mode enabled - configuration not applied"
         echo ""
 
-        # Créer un fichier temporaire pour le dry-run
+        # Create a temporary file for the dry-run
         local temp_dryrun
         temp_dryrun=$(mktemp /tmp/kubelet-config-dryrun.XXXXXX)
         mv "$temp_dryrun" "${temp_dryrun}.yaml"
@@ -1586,7 +1586,7 @@ main() {
 
         generate_kubelet_config "$SYS_CPU" "$SYS_MEM" "$KUBE_CPU" "$KUBE_MEM" "$VCPU" "$RAM_GIB" "$RAM_MIB" "$temp_dryrun" "$NODE_TYPE_DETECTED"
 
-        echo "Configuration qui serait générée:"
+        echo "Configuration that would be generated:"
         echo "───────────────────────────────────────────────────────────────────────────"
         cat "$temp_dryrun"
         echo ""
@@ -1594,14 +1594,14 @@ main() {
         # Nettoyage
         rm -f "$temp_dryrun"
 
-        log_info "Pour appliquer réellement, relancez sans --dry-run"
+        log_info "Run again without --dry-run to apply the changes"
         exit 0
     fi
 
-    # Vérification et création des cgroups
+    # Cgroup verification and creation
     ensure_cgroups
 
-    # Configuration de l'attachement du service kubelet à kubelet.slice
+    # Configure kubelet.service attachment to kubelet.slice
     ensure_kubelet_slice_attachment
 
     # Backup automatique de la configuration existante (toujours faire un backup en production)
@@ -1610,16 +1610,16 @@ main() {
         BACKUP_FILE="${KUBELET_CONFIG}.backup.$(date +%Y%m%d_%H%M%S)"
         log_info "Sauvegarde automatique de la configuration existante..."
         cp "$KUBELET_CONFIG" "$BACKUP_FILE"
-        log_success "Sauvegarde créée: $BACKUP_FILE"
+        log_success "Backup created: $BACKUP_FILE"
     fi
 
-    # Génération de la nouvelle configuration dans un fichier temporaire
+    # Generate the new configuration in a temporary file
     local temp_config
     temp_config=$(mktemp /tmp/kubelet-config.XXXXXX)
     mv "$temp_config" "${temp_config}.yaml"
     temp_config="${temp_config}.yaml"
 
-    log_info "Génération de la nouvelle configuration kubelet..."
+    log_info "Generating the new kubelet configuration..."
     generate_kubelet_config "$SYS_CPU" "$SYS_MEM" "$KUBE_CPU" "$KUBE_MEM" "$VCPU" "$RAM_GIB" "$RAM_MIB" "$temp_config" "$NODE_TYPE_DETECTED"
 
     # Validation YAML
@@ -1629,34 +1629,34 @@ main() {
     log_info "Application de la nouvelle configuration..."
     cp "$temp_config" "$KUBELET_CONFIG"
     rm -f "$temp_config"
-    log_success "Configuration écrite dans $KUBELET_CONFIG"
+    log_success "Configuration written to $KUBELET_CONFIG"
 
-    # Redémarrage du kubelet avec rollback en cas d'échec
-    log_info "Redémarrage du kubelet..."
+    # Restart the kubelet with rollback on failure
+    log_info "Restarting kubelet..."
     if ! systemctl restart kubelet; then
-        log_warning "Échec du redémarrage du kubelet"
+        log_warning "Kubelet restart failed"
 
         # Tentative de rollback
         if [[ -n "$BACKUP_FILE" ]] && [[ -f "$BACKUP_FILE" ]]; then
-            log_warning "Tentative de restauration de la configuration précédente..."
+            log_warning "Attempting to restore the previous configuration..."
             cp "$BACKUP_FILE" "$KUBELET_CONFIG"
 
             if systemctl restart kubelet; then
-                log_warning "Configuration restaurée, kubelet redémarré avec l'ancienne config"
+                log_warning "Configuration restored, kubelet restarted with the previous config"
             else
-                log_warning "Échec de la restauration automatique. Vérifiez manuellement: journalctl -u kubelet -f"
+                log_warning "Automatic restoration failed. Check manually: journalctl -u kubelet -f"
             fi
         else
             log_warning "Pas de backup disponible pour restauration automatique"
         fi
 
-        log_error "La nouvelle configuration a causé un problème. Vérifiez les logs: journalctl -u kubelet -n 100"
+        log_error "The new configuration caused a problem. Check journalctl -u kubelet -n 100"
     fi
 
-    log_success "Kubelet redémarré avec succès"
+    log_success "Kubelet restarted successfully"
 
-    # Vérification de la stabilité
-    log_info "Vérification de la stabilité du kubelet (jusqu'à ${KUBELET_WAIT_TIMEOUT}s)..."
+    # Check stability
+    log_info "Checking kubelet stability (up to ${KUBELET_WAIT_TIMEOUT}s)..."
     local wait_interval=5
     local max_wait=$KUBELET_WAIT_TIMEOUT
     local elapsed=0
@@ -1669,17 +1669,17 @@ main() {
         fi
 
         ((elapsed += wait_interval))
-        log_info "  → Kubelet encore en démarrage (${elapsed}s/${max_wait}s)..."
+        log_info "  → Kubelet still starting (${elapsed}s/${max_wait}s)..."
         sleep "$wait_interval"
     done
 
     if [[ "$kubelet_active" == true ]]; then
-        log_success "✓ Kubelet actif et opérationnel"
+        log_success "✓ Kubelet active and healthy"
 
-        # Validation de l'attachement effectif du kubelet à kubelet.slice
+        # Validate the effective attachment of kubelet to kubelet.slice
         validate_kubelet_slice_attachment
 
-        # Récupération de l'allocatable réel après application (si possible)
+        # Retrieve the real allocatable after application (when possible)
         local post_alloc_snapshot
         post_alloc_snapshot=$(get_current_allocatable_snapshot || true)
         if [[ -n "$pre_alloc_snapshot" ]] && [[ -n "$post_alloc_snapshot" ]]; then
@@ -1693,7 +1693,7 @@ main() {
             local mem_diff_fmt
             cpu_diff_fmt=$(format_diff "$cpu_diff")
             mem_diff_fmt=$(format_diff "$mem_diff")
-            log_info "Δ allocatable réel -> CPU: ${post_cpu_m}m (${cpu_diff_fmt}m) | Mémoire: ${post_mem_mi}Mi (${mem_diff_fmt}Mi)"
+            log_info "Δ real allocatable -> CPU: ${post_cpu_m}m (${cpu_diff_fmt}m) | Memory: ${post_mem_mi}Mi (${mem_diff_fmt}Mi)"
         fi
 
         # Gestion intelligente du backup avec rotation
@@ -1701,15 +1701,15 @@ main() {
             local max_rotation=4
 
             if [[ "$BACKUP" == true ]]; then
-                # --backup spécifié : conserver le backup timestampé permanent
-                log_success "Backup permanent conservé : $BACKUP_FILE"
-                log_info "  → Backup manuel permanent (conservé jusqu'à 90 jours)"
+                # --backup specified: keep the timestamped permanent backup
+                log_success "Permanent backup kept: $BACKUP_FILE"
+                log_info "  → Manual permanent backup (kept up to 90 days)"
             fi
 
-            # Rotation des backups automatiques (toujours effectuée)
+            # Always rotate automatic backups
             log_info "Rotation des backups automatiques..."
 
-            # Rotation : .3 → supprimé, .2 → .3, .1 → .2, .0 → .1
+            # Rotation: .3 → deleted, .2 → .3, .1 → .2, .0 → .1
             for i in $(seq $((max_rotation - 1)) -1 0); do
                 local current="/var/lib/kubelet/config.yaml.last-success.$i"
                 local next="/var/lib/kubelet/config.yaml.last-success.$((i + 1))"
@@ -1725,14 +1725,14 @@ main() {
 
             # Le nouveau backup devient .0
             if [[ "$BACKUP" == true ]]; then
-                # Copier (car on garde aussi l'original timestampé)
+                # Copy (because we also keep the timestamped original)
                 cp "$BACKUP_FILE" "/var/lib/kubelet/config.yaml.last-success.0"
             else
-                # Déplacer (pas de backup permanent demandé)
+                # Move (no permanent backup requested)
                 mv "$BACKUP_FILE" "/var/lib/kubelet/config.yaml.last-success.0"
             fi
 
-            log_info "Backup rotatif créé : /var/lib/kubelet/config.yaml.last-success.0"
+            log_info "Rotating backup created: /var/lib/kubelet/config.yaml.last-success.0"
 
             # Compter les backups disponibles dans l'historique
             local history_count=0
@@ -1741,45 +1741,45 @@ main() {
                     history_count=$((history_count + 1))
                 fi
             done
-            log_info "  → $history_count backup(s) rotatif(s) disponibles : .last-success.{0..$((history_count - 1))}"
-            log_info "  → .0 = plus récent, .$((history_count - 1)) = plus ancien"
+            log_info "  → $history_count rotating backup(s) available: .last-success.{0..$((history_count - 1))}"
+            log_info "  → .0 = newest, .$((history_count - 1)) = oldest"
 
-            # Nettoyage des vieux backups permanents timestampés (>90 jours)
+            # Clean up timestamped permanent backups (>90 days)
             local old_count=$(find /var/lib/kubelet -name 'config.yaml.backup.2*' -mtime +90 2>/dev/null | wc -l)
             if (( old_count > 0 )); then
                 find /var/lib/kubelet -name 'config.yaml.backup.2*' -mtime +90 -delete 2>/dev/null
-                log_info "Nettoyé $old_count backup(s) permanent(s) > 90 jours"
+                log_info "Cleaned $old_count permanent backup(s) older than 90 days"
             fi
         fi
     else
-        log_warning "✗ Kubelet non actif après ${max_wait}s !"
+        log_warning "✗ Kubelet not active after ${max_wait}s!"
 
         # Rollback automatique
         if [[ -n "$BACKUP_FILE" ]] && [[ -f "$BACKUP_FILE" ]]; then
             log_warning "Rollback automatique en cours..."
             cp "$BACKUP_FILE" "$KUBELET_CONFIG"
             if systemctl restart kubelet; then
-                log_warning "Configuration restaurée. Kubelet redémarré avec l'ancienne configuration"
+                log_warning "Configuration restored. Kubelet restarted with the previous configuration"
             else
-                log_warning "La restauration n'a pas réussi. Analysez les logs: journalctl -u kubelet -n 100"
+                log_warning "Restoration failed. Inspect journalctl -u kubelet -n 100"
             fi
         fi
 
-        log_error "Abandon: kubelet non actif après redémarrage. Consultez journalctl -u kubelet -n 100"
+        log_error "Abort: kubelet did not become active after restart. Check journalctl -u kubelet -n 100"
     fi
 
     echo ""
-    log_success "Configuration terminée avec succès!"
+    log_success "Configuration completed successfully!"
     echo ""
-    echo "Prochaines étapes:"
-    echo "  1. Vérifier les logs kubelet:    journalctl -u kubelet -f"
-    echo "  2. Vérifier l'allocatable:       kubectl describe node \$(hostname)"
-    echo "  3. Vérifier les cgroups:         systemd-cgls | grep -E 'system.slice|kubepods'"
+    echo "Next steps:"
+    echo "  1. Check kubelet logs:          journalctl -u kubelet -f"
+    echo "  2. Inspect allocatable:       kubectl describe node \$(hostname)"
+    echo "  3. Inspect cgroups:             systemd-cgls | grep -E 'system.slice|kubepods'"
     if [[ "$BACKUP" == true ]] && [[ -n "$BACKUP_FILE" ]]; then
-        echo "  4. Backup conservé:              $BACKUP_FILE"
+        echo "  4. Backup kept at:              $BACKUP_FILE"
     fi
     echo ""
 }
 
-# Exécution
+# Execution
 main "$@"
