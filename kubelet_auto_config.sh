@@ -35,14 +35,14 @@ set -euo pipefail
 # Version
 VERSION="3.0.1"
 
-# Couleurs pour l'output
+# Output colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Variables globales
+# Global variables
 PROFILE="gke"
 DENSITY_FACTOR=1.0
 TARGET_PODS=""
@@ -51,7 +51,7 @@ NODE_TYPE_DETECTED=""
 DRY_RUN=false
 BACKUP=false
 REQUIRE_DEPENDENCIES=true  # Production mode: block when dependencies are missing
-KUBELET_WAIT_TIMEOUT=60    # Timeout d'attente du kubelet (secondes)
+KUBELET_WAIT_TIMEOUT=60    # Kubelet wait timeout (seconds)
 KUBELET_CONFIG="/var/lib/kubelet/config.yaml"
 LOCK_FILE="/var/lock/kubelet-auto-config.lock"
 LOCK_FD=200  # File descriptor pour flock
@@ -227,7 +227,7 @@ check_root() {
 check_os() {
     if [[ -r /etc/os-release ]]; then
         # Anti-injection validation: detect backticks or unquoted command substitution
-        # Note: grep retourne 1 si aucune correspondance, donc on inverse la logique
+        # Note: grep returns 1 when there is no match, so invert the logic
         if grep -qE '^[^#]*`[^"]*$|^\$\([^)]' /etc/os-release; then
             log_error "Fichier /etc/os-release contient des patterns d'injection dangereux"
         fi
@@ -293,7 +293,7 @@ install_dependencies() {
     # Automatic installation
     log_info "Automatically installing missing dependencies..."
 
-    # Installer bc et jq via apt
+    # Install bc and jq via apt
     if [[ ${#missing_apt[@]} -gt 0 ]]; then
         log_info "Installation de ${missing_apt[*]} via apt..."
 
@@ -302,7 +302,7 @@ install_dependencies() {
             log_warning "Production mode: automatically installing dependencies"
         fi
 
-        # apt avec timeout de 30 secondes
+        # apt with a 30-second timeout
         if ! apt-get -o Acquire::http::Timeout=30 -o Acquire::ftp::Timeout=30 update -qq >/dev/null 2>&1; then
             if [[ "$REQUIRE_DEPENDENCIES" == true ]]; then
                 log_error "apt update failed (timeout or network unreachable)"
@@ -322,7 +322,7 @@ install_dependencies() {
         log_success "${missing_apt[*]} installed"
     fi
 
-    # Installer yq v4
+    # Install yq v4
     if [[ "$need_yq" == "true" ]]; then
         log_info "Installation de yq v4 depuis GitHub..."
 
@@ -841,7 +841,7 @@ calculate_minimal() {
 }
 
 ################################################################################
-# Application du density-factor
+# Applying the density factor
 ################################################################################
 
 apply_density_factor() {
@@ -877,7 +877,7 @@ ensure_cgroups() {
         log_info "cgroup v1 system detected"
     fi
 
-    # Pour cgroup v2
+    # For cgroup v2
     if [[ "$cgroup_version" == "v2" ]]; then
         # Check system.slice
         if [[ ! -d /sys/fs/cgroup/system.slice ]]; then
@@ -937,7 +937,7 @@ ensure_kubelet_slice_attachment() {
         return 0
     fi
 
-    # Le kubelet n'est pas dans la bonne slice
+    # Kubelet is not in the correct slice
     log_warning "Service kubelet actuellement dans : ${current_slice:-system.slice}"
     log_info "Configuring attachment to kubelet.slice..."
 
@@ -965,7 +965,7 @@ EOF
 
     log_success "systemd drop-in created: $dropin_file"
 
-    # Recharger la configuration systemd
+    # Reload the systemd configuration
     log_info "Rechargement de la configuration systemd..."
     systemctl daemon-reload
 
@@ -982,7 +982,7 @@ EOF
 }
 
 ################################################################################
-# Validation de l'attachement effectif du kubelet
+# Validate the effective kubelet attachment
 ################################################################################
 
 validate_kubelet_slice_attachment() {
@@ -1008,12 +1008,12 @@ validate_kubelet_slice_attachment() {
     if [[ -n "$kubelet_pid" ]] && [[ "$kubelet_pid" != "0" ]]; then
         local kubelet_cgroup
 
-        # Parsing robuste avec fallback cgroup v1/v2
+        # Robust parsing with cgroup v1/v2 fallback
         if [[ -f "/proc/$kubelet_pid/cgroup" ]]; then
-            # cgroup v2: ligne unique avec "0::"
+            # cgroup v2: single line with "0::"
             kubelet_cgroup=$(grep -E '^0::' "/proc/$kubelet_pid/cgroup" 2>/dev/null | cut -d: -f3)
 
-            # Fallback cgroup v1: chercher la ligne cpu ou memory
+            # cgroup v1 fallback: search the cpu or memory line
             if [[ -z "$kubelet_cgroup" ]]; then
                 kubelet_cgroup=$(grep -E '^[0-9]+:(cpu|memory):' "/proc/$kubelet_pid/cgroup" 2>/dev/null | head -n1 | cut -d: -f3)
             fi
@@ -1199,11 +1199,11 @@ generate_kubelet_config() {
     read -r system_ephemeral_mib kube_ephemeral_mib <<< "$(calculate_ephemeral_reservations)"
     log_info "Computed ephemeral reservations: system=${system_ephemeral_mib}Mi, kube=${kube_ephemeral_mib}Mi"
 
-    # Si le fichier de config kubelet existe, merger avec l'existant
+    # If the kubelet config file exists, merge with the existing one
     if [[ -f "$KUBELET_CONFIG" ]]; then
         log_info "Merging with existing configuration (preserving custom tweaks)..."
 
-        # Copier l'existant comme base
+        # Copy the existing file as a base
         cp "$KUBELET_CONFIG" "$output_file"
 
         # Add a traceability comment at the top of the file
@@ -1226,7 +1226,7 @@ $header_comment
         yq eval -i ".kubeReserved.memory = \"${kube_mem}Mi\"" "$output_file"
         yq eval -i ".kubeReserved.\"ephemeral-storage\" = \"${kube_ephemeral_mib}Mi\"" "$output_file"
 
-        # enforceNodeAllocatable (adapter selon le type de nœud)
+        # enforceNodeAllocatable (adapt based on node type)
         if [[ "$node_type" == "control-plane" ]]; then
             log_warning "Control-plane mode: kube-reserved enforcement disabled"
             yq eval -i '.enforceNodeAllocatable = ["pods", "system-reserved"]' "$output_file"
@@ -1498,9 +1498,9 @@ main() {
     validate_calculated_value "$KUBE_CPU" "kube-reserved CPU" 50
     validate_calculated_value "$KUBE_MEM" "kube-reserved Memory" 100
 
-    # Application du density-factor
+    # Applying the density factor
     if [[ $(echo "$DENSITY_FACTOR != 1.0" | bc -l) -eq 1 ]]; then
-        log_info "Application du density-factor ${DENSITY_FACTOR}..."
+        log_info "Applying density-factor ${DENSITY_FACTOR}..."
         read -r SYS_CPU SYS_MEM KUBE_CPU KUBE_MEM <<< $(apply_density_factor "$SYS_CPU" "$SYS_MEM" "$KUBE_CPU" "$KUBE_MEM" "$DENSITY_FACTOR")
 
         # Re-validate after applying the factor
@@ -1591,7 +1591,7 @@ main() {
         cat "$temp_dryrun"
         echo ""
 
-        # Nettoyage
+        # Cleanup
         rm -f "$temp_dryrun"
 
         log_info "Run again without --dry-run to apply the changes"
@@ -1604,7 +1604,7 @@ main() {
     # Configure kubelet.service attachment to kubelet.slice
     ensure_kubelet_slice_attachment
 
-    # Backup automatique de la configuration existante (toujours faire un backup en production)
+    # Automatically back up the existing configuration (always keep a backup in production)
     BACKUP_FILE=""
     if [[ -f "$KUBELET_CONFIG" ]]; then
         BACKUP_FILE="${KUBELET_CONFIG}.backup.$(date +%Y%m%d_%H%M%S)"
@@ -1625,7 +1625,7 @@ main() {
     # Validation YAML
     validate_yaml "$temp_config"
 
-    # Application de la configuration
+    # Apply the configuration
     log_info "Application de la nouvelle configuration..."
     cp "$temp_config" "$KUBELET_CONFIG"
     rm -f "$temp_config"
@@ -1696,7 +1696,7 @@ main() {
             log_info "Δ real allocatable -> CPU: ${post_cpu_m}m (${cpu_diff_fmt}m) | Memory: ${post_mem_mi}Mi (${mem_diff_fmt}Mi)"
         fi
 
-        # Gestion intelligente du backup avec rotation
+        # Intelligent backup rotation management
         if [[ -n "$BACKUP_FILE" ]] && [[ -f "$BACKUP_FILE" ]]; then
             local max_rotation=4
 
@@ -1723,7 +1723,7 @@ main() {
                 fi
             done
 
-            # Le nouveau backup devient .0
+            # The new backup becomes .0
             if [[ "$BACKUP" == true ]]; then
                 # Copy (because we also keep the timestamped original)
                 cp "$BACKUP_FILE" "/var/lib/kubelet/config.yaml.last-success.0"
@@ -1734,7 +1734,7 @@ main() {
 
             log_info "Rotating backup created: /var/lib/kubelet/config.yaml.last-success.0"
 
-            # Compter les backups disponibles dans l'historique
+            # Count the backups available in history
             local history_count=0
             for i in $(seq 0 $((max_rotation - 1))); do
                 if [[ -f "/var/lib/kubelet/config.yaml.last-success.$i" ]]; then
@@ -1754,7 +1754,7 @@ main() {
     else
         log_warning "✗ Kubelet not active after ${max_wait}s!"
 
-        # Rollback automatique
+        # Automatic rollback
         if [[ -n "$BACKUP_FILE" ]] && [[ -f "$BACKUP_FILE" ]]; then
             log_warning "Rollback automatique en cours..."
             cp "$BACKUP_FILE" "$KUBELET_CONFIG"
