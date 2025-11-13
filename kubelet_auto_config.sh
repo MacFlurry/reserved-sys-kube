@@ -672,7 +672,7 @@ calculate_density_factor() {
         # Interpolation: 1.2 + ((pods - 80) / 100)
         factor=$(echo "scale=2; 1.2 + (($target_pods - 80) / 100.0)" | bc)
     else
-        # Croissance logarithmique
+        # Logarithmic growth
         local excess=$(( target_pods - 110 ))
         if (( excess > 90 )); then
             excess=90  # Cap at 200 pods total
