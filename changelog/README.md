@@ -1,25 +1,26 @@
-# Archive des Changelogs
+# Changelog Archive
 
-Ce répertoire contient l'historique des changelogs des versions précédentes du projet.
+This directory lists every historical changelog that has been moved out of the repository root.
 
-## Versions Archivées
+## Archived Versions
 
-- **[v2.0.16](CHANGELOG_v2.0.16.md)** - Installation automatique des dépendances (22 oct 2025)
-- **[v2.0.15](CHANGELOG_v2.0.15.md)** - Lab monitoring kubelet (Prometheus/Grafana) (22 oct 2025)
-- **[v2.0.14](CHANGELOG_v2.0.14.md)** - Validation complète des 3 méthodes de déploiement (22 oct 2025)
-- **[v2.0.13](CHANGELOG_v2.0.13.md)** - Garde-fous allocatable & diff automatiques (22 oct 2025)
-- **[v2.0.12](CHANGELOG_v2.0.12.md)** - Réservations éphémères adaptatives & robustesse kubelet (22 oct 2025)
-- **[v2.0.11](CHANGELOG_v2.0.11.md)** - Détection automatique control-plane/worker (21 oct 2025)
-- **[v2.0.10](CHANGELOG_v2.0.10.md)** - Correctifs tests critiques (21 oct 2025)
-- **[v2.0.9](CHANGELOG_v2.0.9.md)** - Amélioration UX suite de tests (21 oct 2025)
-- **[v2.0.8](CHANGELOG_v2.0.8.md)** - Correctifs critiques ARM64 (21 oct 2025)
+- **[v3.0.0](CHANGELOG_v3.0.0.md)** – Production hardening & security improvements (Nov 2025)
+- **[v2.0.16](CHANGELOG_v2.0.16.md)** – Automatic dependency installation (Oct 2025)
+- **[v2.0.15](CHANGELOG_v2.0.15.md)** – kubelet monitoring lab (Prometheus / Grafana) (Oct 2025)
+- **[v2.0.14](CHANGELOG_v2.0.14.md)** – Deployment method validation (Oct 2025)
+- **[v2.0.13](CHANGELOG_v2.0.13.md)** – Allocatable guardrails & automatic diffs (Oct 2025)
+- **[v2.0.12](CHANGELOG_v2.0.12.md)** – Adaptive ephemeral reservations & kubelet robustness (Oct 2025)
+- **[v2.0.11](CHANGELOG_v2.0.11.md)** – Automatic control-plane / worker detection (Oct 2025)
+- **[v2.0.10](CHANGELOG_v2.0.10.md)** – Critical test fixes (Oct 2025)
+- **[v2.0.9](CHANGELOG_v2.0.9.md)** – Test UX improvements (Oct 2025)
+- **[v2.0.8](CHANGELOG_v2.0.8.md)** – ARM64 critical fixes (Oct 2025)
 
-## Changelog Actuel
+## Current Changelog
 
-Le changelog de la version actuelle se trouve à la racine du projet :
+The active changelog lives at the repository root:
 
-- **[CHANGELOG_v3.0.0.md](../CHANGELOG_v3.0.0.md)** - Version actuelle (hardening production et sécurité renforcée)
+- **[CHANGELOG_v3.0.1.md](../CHANGELOG_v3.0.1.md)** – English documentation refresh
 
 ## Convention
 
-À partir de la v3.0.0, chaque nouvelle version majeure conserve son changelog à la racine du projet pendant son cycle de vie actif. Les versions précédentes sont archivées dans ce répertoire lors de la sortie d'une nouvelle version majeure.
+Starting with v3.0.0, each major release keeps its changelog at the root while that version is active. When a newer major release ships, the previous changelog is moved into this archive.
