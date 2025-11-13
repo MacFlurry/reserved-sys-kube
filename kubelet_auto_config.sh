@@ -966,7 +966,7 @@ EOF
     log_success "systemd drop-in created: $dropin_file"
 
     # Reload the systemd configuration
-    log_info "Rechargement de la configuration systemd..."
+    log_info "Reloading the systemd configuration..."
     systemctl daemon-reload
 
     # Ensure the change is applied
@@ -1030,7 +1030,7 @@ validate_kubelet_slice_attachment() {
                 log_warning "Impossible de parser le cgroup du kubelet (format inattendu)"
             fi
         else
-            log_warning "Fichier /proc/$kubelet_pid/cgroup introuvable"
+            log_warning "/proc/$kubelet_pid/cgroup file not found"
         fi
     fi
 
@@ -1647,7 +1647,7 @@ main() {
                 log_warning "Automatic restoration failed. Check manually: journalctl -u kubelet -f"
             fi
         else
-            log_warning "Pas de backup disponible pour restauration automatique"
+            log_warning "No backup available for automatic restore"
         fi
 
         log_error "The new configuration caused a problem. Check journalctl -u kubelet -n 100"
