@@ -301,7 +301,7 @@ cd tests/kubelet-alerting-lab
 
 ## 📚 Additional resources
 
-- [GKE guidance](https://cloud.google.com/kubernetes-engine/docs/how-to/allocating-resources)
+- [GKE guidance](https://cloud.google.com/kubernetes-engine/docs/how-to/configure-node-resources)
 - [EKS resource reservations](https://docs.aws.amazon.com/eks/latest/userguide/managing-kubelet.html)
 - [OpenShift node tuning](https://docs.openshift.com/)
 
@@ -332,7 +332,6 @@ MIT License – see [LICENSE](LICENSE).
 ## 🆘 Support
 
 - GitHub Issues: https://github.com/MacFlurry/reserved-sys-kube/issues
-- Contact: platform-team@your-company.example (replace with your own support channel)
 
 ---
 
