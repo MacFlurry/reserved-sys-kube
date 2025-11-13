@@ -229,7 +229,7 @@ check_os() {
         # Anti-injection validation: detect backticks or unquoted command substitution
         # Note: grep returns 1 when there is no match, so invert the logic
         if grep -qE '^[^#]*`[^"]*$|^\$\([^)]' /etc/os-release; then
-            log_error "Fichier /etc/os-release contient des patterns d'injection dangereux"
+            log_error "/etc/os-release contains dangerous injection patterns"
         fi
 
         # shellcheck disable=SC1091
