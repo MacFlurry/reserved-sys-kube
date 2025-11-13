@@ -1716,7 +1716,7 @@ main() {
 
                 if [[ -f "$current" ]]; then
                     if (( i == max_rotation - 1 )); then
-                        rm -f "$current"  # Supprime le plus ancien
+                        rm -f "$current"  # Remove the oldest backup
                     else
                         mv "$current" "$next"
                     fi
