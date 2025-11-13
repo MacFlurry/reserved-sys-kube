@@ -56,7 +56,7 @@ KUBELET_CONFIG="/var/lib/kubelet/config.yaml"
 LOCK_FILE="/var/lock/kubelet-auto-config.lock"
 LOCK_FD=200  # File descriptor pour flock
 
-# Seuils et garde-fous
+# Guardrails
 MIN_ALLOC_CPU_PERCENT=25         # Minimum allowed allocatable CPU percentage
 MIN_ALLOC_MEM_PERCENT=20         # Minimum allowed allocatable memory percentage
 CONTROL_PLANE_MAX_DENSITY=1.0    # Maximum density factor allowed on a control-plane
