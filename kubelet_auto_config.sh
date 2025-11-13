@@ -61,7 +61,7 @@ MIN_ALLOC_CPU_PERCENT=25         # Minimum allowed allocatable CPU percentage
 MIN_ALLOC_MEM_PERCENT=20         # Minimum allowed allocatable memory percentage
 CONTROL_PLANE_MAX_DENSITY=1.0    # Maximum density factor allowed on a control-plane
 
-# Fonction de nettoyage pour le trap
+# Cleanup helper for the trap
 cleanup() {
     # Release the flock lock (automatically happens when the FD closes)
     if [[ -n "${LOCK_FD:-}" ]]; then
@@ -73,7 +73,7 @@ cleanup() {
 trap cleanup EXIT
 
 ################################################################################
-# Fonctions utilitaires
+# Utility functions
 ################################################################################
 
 log_info() {
@@ -127,7 +127,7 @@ normalize_cpu_to_milli() {
         return 0
     fi
 
-    log_error "normalize_cpu_to_milli: format invalide '$value' (attendu: '100m' ou '1.5')"
+    log_error "normalize_cpu_to_milli: invalid format '$value' (expected '100m' or '1.5')"
     return 1
 }
 
@@ -168,7 +168,7 @@ normalize_memory_to_mib() {
         fi
     fi
 
-    log_error "normalize_memory_to_mib: format invalide '$value' (attendu: '100Mi', '2Gi', '1024Ki')"
+    log_error "normalize_memory_to_mib: invalid format '$value' (expected '100Mi', '2Gi', '1024Ki')"
     return 1
 }
 
@@ -199,7 +199,7 @@ get_current_allocatable_snapshot() {
     local cpu_value=${raw%%,*}
     local mem_value=${raw##*,}
 
-    # Tentative de normalisation (non bloquant pour snapshot)
+    # Best-effort normalization (non-blocking for snapshot)
     local cpu_milli
     local mem_mib
     if cpu_milli=$(normalize_cpu_to_milli "$cpu_value" 2>/dev/null) && \
@@ -290,7 +290,7 @@ install_dependencies() {
         return 0
     fi
 
-    # Installation automatique
+    # Automatic installation
     log_info "Automatically installing missing dependencies..."
 
     # Installer bc et jq via apt
@@ -366,7 +366,7 @@ install_dependencies() {
             if [[ "$REQUIRE_DEPENDENCIES" == true ]]; then
                 log_error "Invalid SHA256 checksum for yq! Possible supply chain attack. Download rejected."
             else
-                log_warning "Checksum SHA256 invalide pour yq ! Continuant sans yq (mode test)..."
+                log_warning "Invalid SHA256 checksum for yq! Continuing without yq (test mode)..."
                 return 0
             fi
         fi
@@ -435,17 +435,17 @@ validate_calculated_value() {
 
     # Ensure the value is not empty
     if [[ -z "$value" ]]; then
-        log_error "Calcul invalide pour $name: valeur vide"
+        log_error "Invalid calculation for $name: empty value"
     fi
 
     # Ensure it is a valid integer
     if ! [[ "$value" =~ ^[0-9]+$ ]]; then
-        log_error "Calcul invalide pour $name: '$value' n'est pas un entier valide"
+        log_error "Invalid calculation for $name: '$value' is not a valid integer"
     fi
 
     # Enforce the minimum value
     if (( value < min )); then
-        log_error "Calcul invalide pour $name: $value < $min (minimum requis)"
+        log_error "Invalid calculation for $name: $value < $min (minimum required)"
     fi
 }
 
@@ -501,7 +501,7 @@ detect_node_type() {
     else
         NODE_TYPE_DETECTED="worker"
         log_success "Node detected: WORKER (no control-plane static pods found)"
-        log_info "Mode worker: kube-reserved sera enforced normalement"
+        log_info "Worker mode: kube-reserved will be enforced normally"
     fi
 
     echo "$NODE_TYPE_DETECTED"
@@ -646,7 +646,7 @@ calculate_ephemeral_reservations() {
 }
 
 ################################################################################
-# Calcul du density-factor automatique
+# Automatic density-factor calculation
 ################################################################################
 
 calculate_density_factor() {
@@ -1092,7 +1092,7 @@ generate_kubelet_config_from_scratch() {
     read -r system_ephemeral_mib kube_ephemeral_mib <<< "$(calculate_ephemeral_reservations)"
     log_info "Computed ephemeral reservations: system=${system_ephemeral_mib}Mi, kube=${kube_ephemeral_mib}Mi"
 
-    # Adapter enforceNodeAllocatable selon le type de nœud
+    # Adapt enforceNodeAllocatable based on node type
     local enforce_list
     if [[ "$node_type" == "control-plane" ]]; then
         enforce_list='  - "pods"
@@ -1106,7 +1106,7 @@ generate_kubelet_config_from_scratch() {
     cat <<EOF
 # Configuration automatically generated on $(date)
 # Profil: $PROFILE | Density-factor: $DENSITY_FACTOR | Type: $node_type
-# Nœud: ${vcpu} vCPU / ${ram_gib} GiB RAM
+# Node: ${vcpu} vCPU / ${ram_gib} GiB RAM
 
 apiVersion: kubelet.config.k8s.io/v1beta1
 kind: KubeletConfiguration
@@ -1127,7 +1127,7 @@ kubeReserved:
 # ============================================================
 # RESERVATION ENFORCEMENT
 # ============================================================
-# Type de nœud: $node_type
+# Node type: $node_type
 # $(if [[ "$node_type" == "control-plane" ]]; then echo "kube-reserved NOT enforced (preserves critical static pods)"; else echo "kube-reserved enforced (worker node)"; fi)
 enforceNodeAllocatable:
 $enforce_list
@@ -1231,7 +1231,7 @@ $header_comment
             log_warning "Control-plane mode: kube-reserved enforcement disabled"
             yq eval -i '.enforceNodeAllocatable = ["pods", "system-reserved"]' "$output_file"
         else
-            log_info "Mode worker: enforcement complet (pods, system-reserved, kube-reserved)"
+            log_info "Worker mode: full enforcement (pods, system-reserved, kube-reserved)"
             yq eval -i '.enforceNodeAllocatable = ["pods", "system-reserved", "kube-reserved"]' "$output_file"
         fi
 
@@ -1289,13 +1289,13 @@ validate_yaml() {
     local api_version
     api_version=$(yq eval '.apiVersion' "$config_file" 2>/dev/null)
     if [[ "$api_version" != "kubelet.config.k8s.io/v1beta1" ]]; then
-        log_error "apiVersion invalide dans la configuration: $api_version"
+        log_error "Invalid apiVersion in configuration: $api_version"
     fi
 
     local kind
     kind=$(yq eval '.kind' "$config_file" 2>/dev/null)
     if [[ "$kind" != "KubeletConfiguration" ]]; then
-        log_error "kind invalide dans la configuration: $kind"
+        log_error "Invalid kind in configuration: $kind"
     fi
 
     log_success "YAML configuration validated"
@@ -1346,7 +1346,7 @@ display_summary() {
     echo "    Memory:           ${kube_mem} MiB ($(echo "scale=2; $kube_mem / 1024" | bc) GiB)"
     echo ""
     echo "───────────────────────────────────────────────────────────────────────────"
-    echo "Totaux:"
+    echo "Totals:"
     echo "───────────────────────────────────────────────────────────────────────────"
     echo ""
     echo "  Reserved CPU:       ${total_cpu}m (${cpu_percent}%)"
@@ -1364,7 +1364,7 @@ display_summary() {
 }
 
 ################################################################################
-# Fonction principale
+# Main function
 ################################################################################
 
 main() {
@@ -1460,7 +1460,7 @@ main() {
 
     # Automatically compute density factor when target-pods is set
     if [[ -n "$TARGET_PODS" ]]; then
-        log_info "Calcul automatique du density-factor pour $TARGET_PODS pods cible..."
+        log_info "Automatically computing density-factor for $TARGET_PODS target pods..."
         DENSITY_FACTOR=$(calculate_density_factor "$TARGET_PODS")
         log_success "Density-factor computed: $DENSITY_FACTOR"
     fi
@@ -1474,7 +1474,7 @@ main() {
     # Validation de RAM_GIB_INT avec fallback
     if [[ -z "$RAM_GIB_INT" ]] || [[ "$RAM_GIB_INT" == "0" ]]; then
         RAM_GIB_INT=1
-        log_warning "RAM GiB invalide ou vide (valeur: '$RAM_GIB'), utilisation valeur minimale: 1 GiB"
+        log_warning "Invalid or empty RAM GiB value ('$RAM_GIB'), using minimum value: 1 GiB"
     fi
 
     case $PROFILE in
@@ -1608,7 +1608,7 @@ main() {
     BACKUP_FILE=""
     if [[ -f "$KUBELET_CONFIG" ]]; then
         BACKUP_FILE="${KUBELET_CONFIG}.backup.$(date +%Y%m%d_%H%M%S)"
-        log_info "Sauvegarde automatique de la configuration existante..."
+        log_info "Automatically backing up the existing configuration..."
         cp "$KUBELET_CONFIG" "$BACKUP_FILE"
         log_success "Backup created: $BACKUP_FILE"
     fi
@@ -1636,7 +1636,7 @@ main() {
     if ! systemctl restart kubelet; then
         log_warning "Kubelet restart failed"
 
-        # Tentative de rollback
+        # Attempt rollback
         if [[ -n "$BACKUP_FILE" ]] && [[ -f "$BACKUP_FILE" ]]; then
             log_warning "Attempting to restore the previous configuration..."
             cp "$BACKUP_FILE" "$KUBELET_CONFIG"
@@ -1707,7 +1707,7 @@ main() {
             fi
 
             # Always rotate automatic backups
-            log_info "Rotation des backups automatiques..."
+            log_info "Rotating automatic backups..."
 
             # Rotation: .3 → deleted, .2 → .3, .1 → .2, .0 → .1
             for i in $(seq $((max_rotation - 1)) -1 0); do
