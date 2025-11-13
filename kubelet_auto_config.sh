@@ -1,7 +1,7 @@
 #!/bin/bash
 ################################################################################
 # Automatic kubelet reservation configuration script
-# Version: 3.0.0
+# Version: 3.0.1
 # Tested on Kubernetes v1.32+, cgroups v1/v2, systemd, Ubuntu
 #
 # See CHANGELOG_v3.0.0.md for the full list of changes.
