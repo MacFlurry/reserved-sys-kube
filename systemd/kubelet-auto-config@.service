@@ -1,0 +1,15 @@
+[Unit]
+Description=Run kubelet auto configuration (%i)
+After=network-online.target
+Wants=network-online.target
+Before=kubelet.service
+ConditionPathExists=/usr/local/bin/kubelet_auto_config.sh
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/default/kubelet-auto-config
+ExecStart=/usr/local/bin/kubelet_auto_config.sh $KUBELET_AUTO_CONFIG_ARGS
+
+[Install]
+WantedBy=multi-user.target
+WantedBy=kubelet.service
