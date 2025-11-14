@@ -1619,19 +1619,9 @@ main() {
 
     local config_changed=true
     if [[ -f "$KUBELET_CONFIG" ]]; then
-        local temp_compare current_compare
-        temp_compare=$(mktemp /tmp/kubelet-config-compare.new.XXXXXX)
-        current_compare=$(mktemp /tmp/kubelet-config-compare.current.XXXXXX)
-
-        # Strip auto-generated comment history lines to avoid false positives
-        sed -E '/^# Automatically updated on/d;/^# Configuration automatically generated on/d;/^$/d' "$temp_config" > "$temp_compare"
-        sed -E '/^# Automatically updated on/d;/^# Configuration automatically generated on/d;/^$/d' "$KUBELET_CONFIG" > "$current_compare"
-
-        if cmp -s "$temp_compare" "$current_compare"; then
+        if cmp -s "$temp_config" "$KUBELET_CONFIG"; then
             config_changed=false
         fi
-
-        rm -f "$temp_compare" "$current_compare"
     fi
 
     if [[ "$config_changed" == false ]]; then
@@ -1639,14 +1629,6 @@ main() {
         log_info "Skipping backup rotation and kubelet restart."
         rm -f "$temp_config"
         return 0
-    fi
-
-    if [[ "$config_changed" == true ]]; then
-        local header_comment="# Automatically updated on $(date) - Profile: $PROFILE | Density-factor: $DENSITY_FACTOR | Type: $NODE_TYPE_DETECTED"
-        sed -i.tmp "1i\\
-$header_comment
-" "$temp_config"
-        rm -f "${temp_config}.tmp"
     fi
 
     # Automatically back up the existing configuration (always keep a backup in production)

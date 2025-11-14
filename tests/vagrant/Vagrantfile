@@ -4,7 +4,7 @@
 
 VAGRANT_DEFAULT_PROVIDER = "vmware_desktop"
 
-BOX_NAME     = "local/ubuntu-24.04-arm64"
+BOX_NAME     = "bytesguy/ubuntu-server-24.04-arm64"
 K8S_VERSION  = "v1.32" # dépôt apt pkgs.k8s.io par minor
 POD_CIDR     = "192.168.0.0/16"
 CLUSTER_NAME = "k8s-lab"
@@ -179,6 +179,7 @@ Vagrant.configure("2") do |config|
   config.vm.synced_folder ".", "/vagrant", disabled: false
   config.vm.synced_folder REPO_ROOT, "/workspace",
                            type: "rsync",
+                           rsync__auto: true,
                            rsync__exclude: [".git/", "node_modules/"]
 
   # Évite la rotation de clé (réduit les échecs SSH pendant le provisioning)
