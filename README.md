@@ -234,26 +234,18 @@ sudo systemctl restart kubelet-auto-config@worker.service
 
 The installer copies the service template from the repository, so you can ship it via cloud-init or automation by copying the `systemd/` folder and running the installer once per node role.
 
-**Typical cloud-init snippet**
+**Cloud-init step-by-step**
 
-```yaml
-#cloud-config
-write_files:
-  - path: /usr/local/bin/kubelet_auto_config.sh
-    permissions: "0755"
-    content: |
-      # (embed the script or download it here)
-  - path: /usr/local/lib/kubelet-auto-config/install.sh
-    permissions: "0755"
-    content: |
-      #!/usr/bin/env bash
-      set -euo pipefail
-      tar -xzf /tmp/reserved-sys-kube.tar.gz -C /usr/local/lib/kubelet-auto-config
-runcmd:
-  - /usr/local/lib/kubelet-auto-config/systemd/install-kubelet-auto-config.sh control-plane
-```
-
-Once cloud-init runs the installer, systemd takes over: the script executes automatically before kubelet starts (first boot and every restart), so no manual action is needed afterward.
+1. **Copy the scripts** (via `write_files` or a tarball) to `/usr/local/lib/kubelet-auto-config/`.
+2. **Install the binaries**:
+   ```bash
+   install -m 0755 /usr/local/lib/kubelet-auto-config/kubelet_auto_config.sh /usr/local/bin/
+   install -m 0755 /usr/local/lib/kubelet-auto-config/rollback-kubelet-config.sh /usr/local/bin/
+   ```
+3. **Run the installer once**:
+   - Control-plane nodes: `sudo /usr/local/lib/kubelet-auto-config/systemd/install-kubelet-auto-config.sh control-plane`
+   - Workers: `sudo /usr/local/lib/kubelet-auto-config/systemd/install-kubelet-auto-config.sh worker`
+4. **Done** – systemd now relaunches `kubelet_auto_config.sh` before kubelet starts and on every `systemctl restart kubelet`.
 
 ---
 
