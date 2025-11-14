@@ -1,7 +1,7 @@
 #!/bin/bash
 ################################################################################
 # Automatic kubelet reservation configuration script
-# Version: 3.1.0
+# Version: 3.1.1
 # Tested on Kubernetes v1.32+, cgroups v1/v2, systemd, Ubuntu
 #
 # See CHANGELOG_v3.0.1.md for the full list of changes.
@@ -34,7 +34,7 @@
 set -euo pipefail
 
 # Version
-VERSION="3.1.0"
+VERSION="3.1.1"
 
 # Output colors
 RED='\033[0;31m'

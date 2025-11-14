@@ -42,6 +42,7 @@ The script automates kubelet reservation sizing. It:
 - ✅ **Adapts** the result based on a desired pod density or a custom density factor.
 - ✅ **Generates** a full kubelet configuration file and preserves existing tweaks.
 - ✅ **Applies** the configuration with automatic validation, restart and backup/rotation logic.
+- ✅ **Skips** needless rewrites: if the generated config matches the live kubelet config, the script now exits early without creating extra backups or restarting kubelet.
 
 ### Why this script?
 
@@ -359,7 +360,7 @@ Pull requests are welcome! Please:
 
 ## 🗒️ Changelog and release notes
 
-See `CHANGELOG_v3.0.1.md` for the latest stable release. Historical changelog files live under the `changelog/` directory.
+See `CHANGELOG_v3.1.1.md` for the latest stable release. Historical changelog files live under the `changelog/` directory.
 
 ---
 
