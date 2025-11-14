@@ -221,7 +221,7 @@ The `systemd/` directory ships a templated unit and ready-to-use environment fil
 
 ```bash
 sudo ./systemd/install-kubelet-auto-config.sh control-plane   # default control-plane profile
-sudo ./systemd/install-kubelet-auto-config.sh worker          # worker profile (density factor 1.2)
+sudo ./systemd/install-kubelet-auto-config.sh worker          # worker profile (target 110 pods ≈ density 1.2)
 sudo systemctl status kubelet-auto-config@worker.service
 ```
 
