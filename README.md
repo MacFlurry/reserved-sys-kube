@@ -146,6 +146,7 @@ Key options:
 | `--target-pods <int>` | Ask the script to compute a density factor that satisfies a target pod count. |
 | `--node-type <control-plane|worker|auto>` | Force the node role (default: auto-detection). |
 | `--backup` | Preserve timestamped backups instead of rotating them only. |
+| `--no-kubelet-restart` | Skip the kubelet restart (useful when invoked via systemd before kubelet starts). |
 | `--dry-run` | Generate the config, display it, but do not apply it. |
 | `--no-require-deps` | Continue even if dependencies cannot be installed (lab only). |
 | `--wait-timeout <seconds>` | Custom kubelet restart timeout (default 60). |
@@ -206,6 +207,53 @@ sudo ./kubelet_auto_config.sh --density-factor 1.4 --dry-run
 4. Confirm allocatable and taints using `kubectl describe node <name>`.
 
 For large fleets consider using an Ansible playbook or a DaemonSet that wraps the script (samples are provided under `ansible/` and `daemonset/`).
+
+---
+
+### Optional: systemd automation
+
+The `systemd/` directory ships a templated unit and ready-to-use environment files so the kubelet reservations are recalculated automatically.
+
+- `systemd/install-kubelet-auto-config.sh control-plane` installs `kubelet-auto-config@control-plane.service` with `--profile gke --backup --no-kubelet-restart` (node role auto-detected).
+- `systemd/install-kubelet-auto-config.sh worker` installs `kubelet-auto-config@worker.service` with `--profile minimal --density-factor 1.2 --backup --no-kubelet-restart`.
+- Each service is `Type=oneshot`, runs before kubelet, and uses `--no-kubelet-restart` so there is no recursive restart loop. Every time kubelet starts (boot, `systemctl restart kubelet`, or a kubelet crash/restart), systemd re-runs the script, reapplies the config, and then kubelet starts normally.
+
+```bash
+sudo ./systemd/install-kubelet-auto-config.sh control-plane   # default control-plane profile
+sudo ./systemd/install-kubelet-auto-config.sh worker          # worker profile (density factor 1.2)
+sudo systemctl status kubelet-auto-config@worker.service
+```
+
+To customize the arguments, edit `/etc/systemd/system/kubelet-auto-config@<profile>.service.d/env.conf` and reload systemd:
+
+```bash
+sudo vim /etc/systemd/system/kubelet-auto-config@worker.service.d/env.conf
+sudo systemctl daemon-reload
+sudo systemctl restart kubelet-auto-config@worker.service
+```
+
+The installer copies the service template from the repository, so you can ship it via cloud-init or automation by copying the `systemd/` folder and running the installer once per node role.
+
+**Typical cloud-init snippet**
+
+```yaml
+#cloud-config
+write_files:
+  - path: /usr/local/bin/kubelet_auto_config.sh
+    permissions: "0755"
+    content: |
+      # (embed the script or download it here)
+  - path: /usr/local/lib/kubelet-auto-config/install.sh
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      tar -xzf /tmp/reserved-sys-kube.tar.gz -C /usr/local/lib/kubelet-auto-config
+runcmd:
+  - /usr/local/lib/kubelet-auto-config/systemd/install-kubelet-auto-config.sh control-plane
+```
+
+Once cloud-init runs the installer, systemd takes over: the script executes automatically before kubelet starts (first boot and every restart), so no manual action is needed afterward.
 
 ---
 

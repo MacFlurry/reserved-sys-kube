@@ -9,7 +9,6 @@ K8S_VERSION  = "v1.32" # dépôt apt pkgs.k8s.io par minor
 POD_CIDR     = "192.168.0.0/16"
 CLUSTER_NAME = "k8s-lab"
 IP_BASE      = "192.168.56"
-REPO_ROOT    = File.expand_path("../..", __dir__) # Racine du repo (parent de tests/)
 
 NODES = [
   { name: "cp1", ip_octet: 10, role: "control-plane" },
@@ -98,6 +97,10 @@ MASTER_PROVISION = <<-SHELL
       --apiserver-advertise-address=#{CONTROL_PLANE_IP} \
       --control-plane-endpoint=#{CONTROL_PLANE_IP} \
       --upload-certs
+
+    # Attendre que l'API server soit complètement démarré
+    echo "Attente de la stabilisation de l'API server..."
+    sleep 15
   fi
 
   # Kubeconfig pour vagrant
@@ -105,26 +108,8 @@ MASTER_PROVISION = <<-SHELL
   cp -f /etc/kubernetes/admin.conf /home/vagrant/.kube/config
   chown -R vagrant:vagrant /home/vagrant/.kube
 
-  # Attendre que l'API server soit complètement prêt (retry robuste)
-  echo "Attente de la disponibilité complète de l'API server..."
-  for i in $(seq 1 60); do
-    if kubectl --kubeconfig=/etc/kubernetes/admin.conf get nodes >/dev/null 2>&1; then
-      echo "API server prêt après $i tentative(s)"
-      break
-    fi
-    echo "Attente de l'API server... ($i/60)"
-    sleep 5
-  done
-
-  # Vérification finale que l'API server répond
-  if ! kubectl --kubeconfig=/etc/kubernetes/admin.conf get nodes >/dev/null 2>&1; then
-    echo "ERREUR: L'API server ne répond pas après 5 minutes"
-    exit 1
-  fi
-
   # Calico (CNI)
   if ! kubectl --kubeconfig=/etc/kubernetes/admin.conf get ns calico-system >/dev/null 2>&1; then
-    echo "Installation de Calico CNI..."
     curl -fsSL https://raw.githubusercontent.com/projectcalico/calico/v3.30.4/manifests/calico.yaml -o /tmp/calico.yaml
     kubectl --kubeconfig=/etc/kubernetes/admin.conf apply -f /tmp/calico.yaml
   fi
@@ -143,47 +128,34 @@ SHELL
 WORKER_PROVISION = <<-SHELL
   set -euxo pipefail
 
+  # Attendre que le join script soit prêt
+  echo "Attente du fichier join.sh..."
+  for i in $(seq 1 60); do
+    test -f /vagrant/join.sh && break
+    sleep 5
+  done
+  test -f /vagrant/join.sh
+
   # Attendre que le control plane soit complètement stable (important!)
   echo "Attente de la stabilité du control plane..."
-  sleep 10
+  sleep 30
 
   # Assainir un éventuel kubelet déjà démarré par systemd (reprovisionnements)
   systemctl stop kubelet 2>/dev/null || true
 
   # Vérifier que l'API server répond avant de joindre
-  echo "Vérification de la disponibilité de l'API server..."
-  for i in $(seq 1 60); do
-    if curl -k https://#{CONTROL_PLANE_IP}:6443/healthz &>/dev/null; then
-      echo "API server disponible"
-      break
-    fi
-    echo "Attente de l'API server... ($i/60)"
+  for i in $(seq 1 30); do
+    curl -k https://#{CONTROL_PLANE_IP}:6443/healthz &>/dev/null && break
+    echo "Attente de l'API server... ($i/30)"
     sleep 5
   done
 
-  # Générer un nouveau token de join (au cas où celui de join.sh aurait expiré)
-  echo "Génération d'un nouveau token de join..."
-  JOIN_CMD=$(ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null vagrant@#{CONTROL_PLANE_IP} 'sudo kubeadm token create --print-join-command' 2>/dev/null || true)
-
-  # Si SSH échoue, utiliser le join.sh (fallback)
-  if [ -z "$JOIN_CMD" ]; then
-    if [ -f /vagrant/join.sh ]; then
-      echo "Fallback: utilisation de /vagrant/join.sh"
-      bash /vagrant/join.sh
-    else
-      echo "ERREUR: Impossible de générer un token et /vagrant/join.sh n'existe pas"
-      exit 1
-    fi
-  else
-    echo "Exécution de la commande de join avec token frais..."
-    eval "sudo $JOIN_CMD"
-  fi
+  bash /vagrant/join.sh
 SHELL
 
 Vagrant.configure("2") do |config|
   config.vm.box = BOX_NAME
   config.vm.synced_folder ".", "/vagrant", disabled: false
-  config.vm.synced_folder REPO_ROOT, "/workspace", disabled: false
 
   # Évite la rotation de clé (réduit les échecs SSH pendant le provisioning)
   config.ssh.insert_key = false
@@ -215,40 +187,6 @@ Vagrant.configure("2") do |config|
       # Provision commun — run: once
       node.vm.provision "shell", inline: COMMON_PROVISION, run: "once"
 
-      # Configuration de l'interface private network (workaround VMware) — run: once
-      node.vm.provision "shell", run: "once", inline: <<-SHELL
-        set -euxo pipefail
-        NODE_IP="#{IP_BASE}.#{n[:ip_octet]}"
-
-        # Détecter l'interface sans IP (typiquement ens256 pour VMware)
-        IFACE=$(ip -o link show | awk -F': ' '{print $2}' | grep -E '^ens[0-9]+$' | while read if; do
-          if ! ip addr show "$if" | grep -q 'inet '; then
-            echo "$if"
-            break
-          fi
-        done)
-
-        if [ -n "$IFACE" ]; then
-          echo "Configuration de l'interface $IFACE avec l'IP $NODE_IP"
-          ip link set "$IFACE" up
-          ip addr add "$NODE_IP/24" dev "$IFACE"
-
-          # Rendre la configuration persistante avec netplan
-          cat >/etc/netplan/60-private-network.yaml <<EOF
-network:
-  version: 2
-  ethernets:
-    $IFACE:
-      addresses:
-        - $NODE_IP/24
-EOF
-          chmod 600 /etc/netplan/60-private-network.yaml
-          netplan apply || true
-        else
-          echo "AVERTISSEMENT: Aucune interface non configurée trouvée"
-        fi
-      SHELL
-
       # Forcer le node-ip de CE nœud (crucial avec VMware Fusion multi-interfaces) — run: once
       node.vm.provision "shell", run: "once", inline: <<-SHELL
         set -euxo pipefail
@@ -270,34 +208,6 @@ EOF
         # Join worker — run: once (ne se relancera pas aux boots suivants)
         node.vm.provision "shell", inline: WORKER_PROVISION, run: "once"
       end
-
-      node.vm.provision "shell", privileged: true, run: "once", inline: <<-SHELL
-        set -euxo pipefail
-
-        # Vérifier que /workspace est monté
-        echo "Vérification du montage /workspace..."
-        if [ ! -d /workspace ]; then
-          echo "ERREUR: /workspace n'est pas monté"
-          exit 1
-        fi
-
-        if [ ! -f /workspace/kubelet_auto_config.sh ]; then
-          echo "ERREUR: Les fichiers du repo ne sont pas disponibles dans /workspace"
-          exit 1
-        fi
-
-        echo "Installation de kubelet-auto-config systemd service (rôle: #{n[:role]})..."
-        ARCHIVE="/tmp/reserved-sys-kube.tar.gz"
-        tar czf "$ARCHIVE" -C /workspace kubelet_auto_config.sh rollback-kubelet-config.sh systemd
-        rm -rf /usr/local/lib/kubelet-auto-config
-        mkdir -p /usr/local/lib/kubelet-auto-config
-        tar xzf "$ARCHIVE" -C /usr/local/lib/kubelet-auto-config
-        install -m 0755 /usr/local/lib/kubelet-auto-config/kubelet_auto_config.sh /usr/local/bin/kubelet_auto_config.sh
-        install -m 0755 /usr/local/lib/kubelet-auto-config/rollback-kubelet-config.sh /usr/local/bin/rollback-kubelet-config.sh
-        /usr/local/lib/kubelet-auto-config/systemd/install-kubelet-auto-config.sh #{n[:role]}
-
-        echo "Service kubelet-auto-config@#{n[:role]} installé et activé"
-      SHELL
     end
   end
 end

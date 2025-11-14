@@ -4,7 +4,7 @@
 # Version: 3.0.1
 # Tested on Kubernetes v1.32+, cgroups v1/v2, systemd, Ubuntu
 #
-# See CHANGELOG_v3.0.0.md for the full list of changes.
+# See CHANGELOG_v3.0.1.md for the full list of changes.
 #
 # Usage:
 #   ./kubelet_auto_config.sh [OPTIONS]
@@ -17,6 +17,7 @@
 #   --wait-timeout <seconds>                  Kubelet wait timeout in seconds (default: 60)
 #   --dry-run                                 Show the configuration without applying it
 #   --backup                                  Keep the timestamped backup (instead of only rotating)
+#   --no-kubelet-restart                      Do not restart kubelet after applying the configuration
 #   --no-require-deps                         Disable strict dependency mode (lab only)
 #   --help                                    Display this help message
 #
@@ -55,6 +56,7 @@ KUBELET_WAIT_TIMEOUT=60    # Kubelet wait timeout (seconds)
 KUBELET_CONFIG="/var/lib/kubelet/config.yaml"
 LOCK_FILE="/var/lock/kubelet-auto-config.lock"
 LOCK_FD=200  # File descriptor pour flock
+RESTART_KUBELET=true
 
 # Guardrails
 MIN_ALLOC_CPU_PERCENT=25         # Minimum allowed allocatable CPU percentage
@@ -339,7 +341,7 @@ install_dependencies() {
                 ;;
             arm64|aarch64)
                 yq_binary="yq_linux_arm64"
-                yq_sha256="4d10a57ff315ba5f7475bb43345f782c38a6cb5253b2b5c45e7de2fb9b7c87f8"
+                yq_sha256="0e7e1524f68d91b3ff9b089872d185940ab0fa020a5a9052046ef10547023156"
                 ;;
             *)
                 log_error "Unsupported architecture for yq: $arch"
@@ -687,7 +689,7 @@ calculate_density_factor() {
 # Reservation calculation formulas
 ################################################################################
 
-# Profil GKE (Google Kubernetes Engine)
+# GKE profile (Google Kubernetes Engine)
 calculate_gke() {
     local vcpu=$1
     local ram_gib=$2
@@ -741,7 +743,7 @@ calculate_gke() {
     echo "$sys_cpu $sys_mem $kube_cpu $kube_mem"
 }
 
-# Profil EKS (Amazon Elastic Kubernetes Service)
+# EKS profile (Amazon Elastic Kubernetes Service)
 calculate_eks() {
     local vcpu=$1
     local ram_gib=$2
@@ -785,7 +787,7 @@ calculate_eks() {
     echo "$sys_cpu $sys_mem $kube_cpu $kube_mem"
 }
 
-# Profil Conservative (Red Hat OpenShift-like)
+# Conservative profile (Red Hat OpenShift-like)
 calculate_conservative() {
     local vcpu=$1
     local ram_gib=$2
@@ -810,7 +812,7 @@ calculate_conservative() {
     echo "$sys_cpu $sys_mem $kube_cpu $kube_mem"
 }
 
-# Profil Minimal
+# Minimal profile
 calculate_minimal() {
     local vcpu=$1
     local ram_gib=$2
@@ -883,7 +885,7 @@ ensure_cgroups() {
         if [[ ! -d /sys/fs/cgroup/system.slice ]]; then
             log_warning "Cgroup /system.slice does not exist, systemd will create it"
         else
-            log_success "Cgroup /system.slice existe"
+            log_success "Cgroup /system.slice already exists"
         fi
 
         # Check kubelet.slice
@@ -906,10 +908,10 @@ EOF
                 log_success "kubelet.slice created (systemd will mount the slice on demand)"
             fi
         else
-            log_success "Cgroup /kubelet.slice existe"
+            log_success "Cgroup /kubelet.slice already exists"
         fi
     else
-        # Pour cgroup v1
+        # For cgroup v1
         log_warning "cgroup v1 detected. Configure cgroups manually if needed."
     fi
 }
@@ -938,7 +940,7 @@ ensure_kubelet_slice_attachment() {
     fi
 
     # Kubelet is not in the correct slice
-    log_warning "Service kubelet actuellement dans : ${current_slice:-system.slice}"
+    log_warning "kubelet.service currently attached to: ${current_slice:-system.slice}"
     log_info "Configuring attachment to kubelet.slice..."
 
     # Create the drop-in directory if required
@@ -1105,7 +1107,7 @@ generate_kubelet_config_from_scratch() {
 
     cat <<EOF
 # Configuration automatically generated on $(date)
-# Profil: $PROFILE | Density-factor: $DENSITY_FACTOR | Type: $node_type
+# Profile: $PROFILE | Density-factor: $DENSITY_FACTOR | Type: $node_type
 # Node: ${vcpu} vCPU / ${ram_gib} GiB RAM
 
 apiVersion: kubelet.config.k8s.io/v1beta1
@@ -1330,7 +1332,7 @@ display_summary() {
     echo "  vCPU:              $vcpu"
     echo "  RAM:               $ram_gib GiB"
     echo "  Type:              $node_type"
-    echo "  Profil:            $PROFILE"
+    echo "  Profile:           $PROFILE"
     echo "  Density-factor:    $DENSITY_FACTOR"
     echo ""
     echo "───────────────────────────────────────────────────────────────────────────"
@@ -1402,6 +1404,10 @@ main() {
                 BACKUP=true
                 shift
                 ;;
+            --no-kubelet-restart)
+                RESTART_KUBELET=false
+                shift
+                ;;
             --no-require-deps)
                 REQUIRE_DEPENDENCIES=false
                 log_warning "Strict dependency mode disabled (not recommended in production)"
@@ -1411,7 +1417,7 @@ main() {
                 usage
                 ;;
             *)
-                log_error "Option inconnue: $1. Utilisez --help pour l'aide."
+                log_error "Unknown option: $1. Run --help for usage information."
                 ;;
         esac
     done
@@ -1631,6 +1637,7 @@ main() {
     rm -f "$temp_config"
     log_success "Configuration written to $KUBELET_CONFIG"
 
+    if [[ "$RESTART_KUBELET" == true ]]; then
     # Restart the kubelet with rollback on failure
     log_info "Restarting kubelet..."
     if ! systemctl restart kubelet; then
@@ -1756,7 +1763,7 @@ main() {
 
         # Automatic rollback
         if [[ -n "$BACKUP_FILE" ]] && [[ -f "$BACKUP_FILE" ]]; then
-            log_warning "Rollback automatique en cours..."
+            log_warning "Automatic rollback in progress..."
             cp "$BACKUP_FILE" "$KUBELET_CONFIG"
             if systemctl restart kubelet; then
                 log_warning "Configuration restored. Kubelet restarted with the previous configuration"
@@ -1766,6 +1773,9 @@ main() {
         fi
 
         log_error "Abort: kubelet did not become active after restart. Check journalctl -u kubelet -n 100"
+    fi
+    else
+        log_info "Skipping kubelet restart (--no-kubelet-restart). Restart kubelet manually to apply the changes."
     fi
 
     echo ""
