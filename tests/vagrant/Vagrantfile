@@ -150,6 +150,10 @@ WORKER_PROVISION = <<-SHELL
   # Assainir un éventuel kubelet déjà démarré par systemd (reprovisionnements)
   systemctl stop kubelet 2>/dev/null || true
 
+  echo "Nettoyage de l'état kubeadm précédemment généré..."
+  kubeadm reset -f || true
+  rm -rf /etc/cni/net.d/* || true
+
   # Vérifier que l'API server répond avant de joindre
   echo "Vérification de la disponibilité de l'API server..."
   for i in $(seq 1 60); do
@@ -161,23 +165,13 @@ WORKER_PROVISION = <<-SHELL
     sleep 5
   done
 
-  # Générer un nouveau token de join (au cas où celui de join.sh aurait expiré)
-  echo "Génération d'un nouveau token de join..."
-  JOIN_CMD=$(ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null vagrant@#{CONTROL_PLANE_IP} 'sudo kubeadm token create --print-join-command' 2>/dev/null || true)
-
-  # Si SSH échoue, utiliser le join.sh (fallback)
-  if [ -z "$JOIN_CMD" ]; then
-    if [ -f /vagrant/join.sh ]; then
-      echo "Fallback: utilisation de /vagrant/join.sh"
-      bash /vagrant/join.sh
-    else
-      echo "ERREUR: Impossible de générer un token et /vagrant/join.sh n'existe pas"
-      exit 1
-    fi
-  else
-    echo "Exécution de la commande de join avec token frais..."
-    eval "sudo $JOIN_CMD"
+  if [ ! -f /vagrant/join.sh ]; then
+    echo "ERREUR: /vagrant/join.sh introuvable (le control plane n'a pas publié le script)"
+    exit 1
   fi
+
+  echo "Exécution de /vagrant/join.sh"
+  bash /vagrant/join.sh
 SHELL
 
 Vagrant.configure("2") do |config|
@@ -228,10 +222,20 @@ Vagrant.configure("2") do |config|
           fi
         done)
 
+        if [ -z "$IFACE" ]; then
+          for candidate in ens256 ens224 ens192; do
+            if ip link show "$candidate" >/dev/null 2>&1; then
+              IFACE="$candidate"
+              break
+            fi
+          done
+        fi
+
         if [ -n "$IFACE" ]; then
           echo "Configuration de l'interface $IFACE avec l'IP $NODE_IP"
           ip link set "$IFACE" up
-          ip addr add "$NODE_IP/24" dev "$IFACE"
+          ip addr flush dev "$IFACE" || true
+          ip addr add "$NODE_IP/24" dev "$IFACE" || true
 
           # Rendre la configuration persistante avec netplan
           cat >/etc/netplan/60-private-network.yaml <<EOF
