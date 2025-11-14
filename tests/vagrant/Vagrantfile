@@ -177,7 +177,9 @@ SHELL
 Vagrant.configure("2") do |config|
   config.vm.box = BOX_NAME
   config.vm.synced_folder ".", "/vagrant", disabled: false
-  config.vm.synced_folder REPO_ROOT, "/workspace", disabled: false
+  config.vm.synced_folder REPO_ROOT, "/workspace",
+                           type: "rsync",
+                           rsync__exclude: [".git/", "node_modules/"]
 
   # Évite la rotation de clé (réduit les échecs SSH pendant le provisioning)
   config.ssh.insert_key = false
