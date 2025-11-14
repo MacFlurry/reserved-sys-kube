@@ -215,7 +215,7 @@ For large fleets consider using an Ansible playbook or a DaemonSet that wraps th
 The `systemd/` directory ships a templated unit and ready-to-use environment files so the kubelet reservations are recalculated automatically.
 
 - `systemd/install-kubelet-auto-config.sh control-plane` installs `kubelet-auto-config@control-plane.service` with `--profile gke --backup --no-kubelet-restart` (node role auto-detected).
-- `systemd/install-kubelet-auto-config.sh worker` installs `kubelet-auto-config@worker.service` with `--profile minimal --density-factor 1.2 --backup --no-kubelet-restart`.
+- `systemd/install-kubelet-auto-config.sh worker` installs `kubelet-auto-config@worker.service` with `--profile gke --target-pods 110 --backup --no-kubelet-restart`.
 - Each service is `Type=oneshot`, runs before kubelet, and uses `--no-kubelet-restart` so there is no recursive restart loop. Every time kubelet starts (boot, `systemctl restart kubelet`, or a kubelet crash/restart), systemd re-runs the script, reapplies the config, and then kubelet starts normally.
 
 ```bash
