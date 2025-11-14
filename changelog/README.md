@@ -4,6 +4,7 @@ This directory lists every historical changelog that has been moved out of the r
 
 ## Archived Versions
 
+- **[v3.1.0](CHANGELOG_v3.1.0.md)** – English documentation refresh & systemd automation (Nov 2025)
 - **[v3.0.0](CHANGELOG_v3.0.0.md)** – Production hardening & security improvements (Nov 2025)
 - **[v2.0.16](CHANGELOG_v2.0.16.md)** – Automatic dependency installation (Oct 2025)
 - **[v2.0.15](CHANGELOG_v2.0.15.md)** – kubelet monitoring lab (Prometheus / Grafana) (Oct 2025)
@@ -19,7 +20,7 @@ This directory lists every historical changelog that has been moved out of the r
 
 The active changelog lives at the repository root:
 
-- **[CHANGELOG_v3.0.1.md](../CHANGELOG_v3.0.1.md)** – English documentation refresh
+- **[CHANGELOG_v3.1.1.md](../CHANGELOG_v3.1.1.md)** – Config diff & rsync synced-folder fixes
 
 ## Convention
 
