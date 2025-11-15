@@ -27,7 +27,7 @@ write_files:
       
       VERSION_TAG="${VERSION_TAG:-v3.1.2}"
       REPO="${REPO:-https://github.com/MacFlurry/reserved-sys-kube.git}"
-      WORKDIR="/run/reserved-sys-kube-work"
+      WORKDIR="/tmp/reserved-sys-kube-work"
       TARGET_LIB="/usr/local/lib/kubelet-auto-config"
       TARGET_BIN="/usr/local/bin"
       ROLE="${1:-control-plane}"
