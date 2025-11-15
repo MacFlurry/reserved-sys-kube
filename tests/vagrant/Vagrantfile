@@ -295,12 +295,13 @@ EOF
 
         echo "Installation de kubelet-auto-config systemd service (rôle: #{n[:role]})..."
         ARCHIVE="/tmp/reserved-sys-kube.tar.gz"
-        tar czf "$ARCHIVE" -C /workspace kubelet_auto_config.sh rollback-kubelet-config.sh systemd
+        tar czf "$ARCHIVE" -C /workspace kubelet_auto_config.sh rollback-kubelet-config.sh remove-kubelet-auto-config.sh systemd
         rm -rf /usr/local/lib/kubelet-auto-config
         mkdir -p /usr/local/lib/kubelet-auto-config
         tar xzf "$ARCHIVE" -C /usr/local/lib/kubelet-auto-config
         install -m 0755 /usr/local/lib/kubelet-auto-config/kubelet_auto_config.sh /usr/local/bin/kubelet_auto_config.sh
         install -m 0755 /usr/local/lib/kubelet-auto-config/rollback-kubelet-config.sh /usr/local/bin/rollback-kubelet-config.sh
+        install -m 0755 /usr/local/lib/kubelet-auto-config/remove-kubelet-auto-config.sh /usr/local/bin/remove-kubelet-auto-config.sh
         /usr/local/lib/kubelet-auto-config/systemd/install-kubelet-auto-config.sh #{n[:role]}
 
         echo "Service kubelet-auto-config@#{n[:role]} installé et activé"

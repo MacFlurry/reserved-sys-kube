@@ -20,6 +20,7 @@
 - [Cluster deployment](#-cluster-deployment)
 - [Post deployment validation](#-post-deployment-validation)
 - [Rollback](#-rollback)
+- [Removal](#-removal)
 - [FAQ](#-faq)
 - [Troubleshooting](#-troubleshooting)
 - [Monitoring and metrics](#-monitoring-and-metrics)
@@ -117,7 +118,7 @@ chmod +x kubelet_auto_config.sh
 ```bash
 git clone https://github.com/MacFlurry/reserved-sys-kube.git
 cd reserved-sys-kube
-chmod +x kubelet_auto_config.sh rollback-kubelet-config.sh
+chmod +x kubelet_auto_config.sh rollback-kubelet-config.sh remove-kubelet-auto-config.sh
 ```
 
 ### Method 3 – Push to every node
@@ -125,8 +126,8 @@ chmod +x kubelet_auto_config.sh rollback-kubelet-config.sh
 ```bash
 NODES="node1 node2 node3"
 for node in $NODES; do
-  scp kubelet_auto_config.sh root@$node:/usr/local/bin/
-  ssh root@$node "chmod +x /usr/local/bin/kubelet_auto_config.sh"
+  scp kubelet_auto_config.sh rollback-kubelet-config.sh remove-kubelet-auto-config.sh root@$node:/usr/local/bin/
+  ssh root@$node "chmod +x /usr/local/bin/kubelet_auto_config.sh /usr/local/bin/rollback-kubelet-config.sh /usr/local/bin/remove-kubelet-auto-config.sh"
 done
 ```
 
@@ -242,6 +243,7 @@ The installer copies the service template from the repository, so you can ship i
    ```bash
    install -m 0755 /usr/local/lib/kubelet-auto-config/kubelet_auto_config.sh /usr/local/bin/
    install -m 0755 /usr/local/lib/kubelet-auto-config/rollback-kubelet-config.sh /usr/local/bin/
+    install -m 0755 /usr/local/lib/kubelet-auto-config/remove-kubelet-auto-config.sh /usr/local/bin/
    ```
 3. **Run the installer once**:
    - Control-plane nodes: `sudo /usr/local/lib/kubelet-auto-config/systemd/install-kubelet-auto-config.sh control-plane`
@@ -284,6 +286,26 @@ Features:
 - Rotating backups: `/var/lib/kubelet/config.yaml.last-success.{0..3}`
 - Permanent backups when `--backup` is passed: `/var/lib/kubelet/config.yaml.backup.YYYYMMDD_HHMMSS`
 - Safety checks ensure the selected file exists and is readable before copying.
+
+---
+
+## 🧹 Removal
+
+Use `remove-kubelet-auto-config.sh` when you need to remove every component (scripts + systemd units) without touching the running kubelet:
+
+```bash
+sudo ./remove-kubelet-auto-config.sh             # cleanup with live changes
+sudo ./remove-kubelet-auto-config.sh --dry-run   # preview actions
+```
+
+The script:
+
+- Disables every `kubelet-auto-config@*.service` unit and removes their drop-ins/env files.
+- Deletes `/usr/local/bin/{kubelet_auto_config.sh,rollback-kubelet-config.sh,remove-kubelet-auto-config.sh}` and `/usr/local/lib/kubelet-auto-config/`.
+- Cleans the lock file under `/var/lock`.
+- Leaves `/var/lib/kubelet/config.yaml` and your workloads untouched (no kubelet restart is attempted).
+
+After the cleanup, you can optionally run `rollback-kubelet-config.sh --index 1` during a maintenance window if you want to restore the pre-script kubelet config. Otherwise the last applied configuration keeps running until you change it manually.
 
 ---
 
