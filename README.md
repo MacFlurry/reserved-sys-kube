@@ -382,7 +382,7 @@ Pull requests are welcome! Please:
 
 ## 🗒️ Changelog and release notes
 
-See `CHANGELOG_v3.1.1.md` for the latest stable release. Historical changelog files live under the `changelog/` directory.
+See `CHANGELOG_v3.1.2.md` for the latest stable release. Historical changelog files live under the `changelog/` directory.
 
 ---
 
