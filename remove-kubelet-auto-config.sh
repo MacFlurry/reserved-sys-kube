@@ -177,3 +177,4 @@ remove_path "$LOCK_FILE" "lock file"
 run_cmd systemctl daemon-reload
 
 log_success "kubelet auto configuration tooling removed."
+

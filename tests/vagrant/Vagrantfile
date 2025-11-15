@@ -1,32 +1,47 @@
 # Vagrantfile — Kubernetes (kubeadm + containerd + Calico) sur Ubuntu 24.04 ARM64
 # Provider: VMware Fusion (vagrant-vmware-desktop)
 # 1 control-plane (3 vCPU / 4GB) + 1 worker (2 vCPU / 2GB) — Pod CIDR Calico: 192.168.0.0/16
+# Version améliorée avec meilleures pratiques de sécurité et fiabilité
 
 VAGRANT_DEFAULT_PROVIDER = "vmware_desktop"
 
-BOX_NAME     = "bytesguy/ubuntu-server-24.04-arm64"
-K8S_VERSION  = "v1.32" # dépôt apt pkgs.k8s.io par minor
-POD_CIDR     = "192.168.0.0/16"
-CLUSTER_NAME = "k8s-lab"
-IP_BASE      = "192.168.56"
-REPO_ROOT    = File.expand_path("../..", __dir__) # Racine du repo (parent de tests/)
+# ========== CONFIGURATION GLOBALE ==========
+BOX_NAME            = "bytesguy/ubuntu-server-24.04-arm64"
+K8S_VERSION         = "v1.32"           # Version mineure pour le dépôt apt
+K8S_PACKAGE_VERSION = "1.32.0-1.1"      # Version exacte des packages (reproductibilité)
+CALICO_VERSION      = "v3.30.4"         # Version Calico (compatibilité vérifiée avec K8s 1.32)
+POD_CIDR            = "192.168.0.0/16"  # CIDR des pods (doit correspondre à Calico)
+CLUSTER_NAME        = "k8s-lab"
+IP_BASE             = "192.168.56"
+REPO_ROOT           = File.expand_path("../..", __dir__) # Racine du repo (parent de tests/)
 
+# ========== TOPOLOGIE DU CLUSTER ==========
 NODES = [
-  { name: "cp1", ip_octet: 10, role: "control-plane" },
-  { name: "w1",  ip_octet: 11, role: "worker" },
+  { name: "cp1", ip_octet: 10, role: "control-plane", cpus: 3, memory: 4096 },
+  { name: "w1",  ip_octet: 11, role: "worker",        cpus: 2, memory: 2048 },
 ]
 
-CONTROL_PLANE   = NODES.find { |n| n[:role] == "control-plane" }
+# Validation de la topologie
+CONTROL_PLANE    = NODES.find { |n| n[:role] == "control-plane" }
 CONTROL_PLANE_IP = "#{IP_BASE}.#{CONTROL_PLANE[:ip_octet]}" if CONTROL_PLANE
-raise "NODES must include a control-plane entry" unless CONTROL_PLANE_IP
+raise "ERREUR: NODES doit contenir au moins un nœud control-plane" unless CONTROL_PLANE_IP
 
+# ========== SCRIPT DE PROVISIONING COMMUN ==========
 COMMON_PROVISION = <<-SHELL
   set -euxo pipefail
 
-  # Attendre la fin de cloud-init pour éviter les courses avec SSH/réseau
+  # Marqueur d'idempotence pour éviter les re-provisions inutiles
+  PROVISION_MARKER="/etc/kubernetes/.common-provisioned"
+  if [ -f "$PROVISION_MARKER" ]; then
+    echo "⏭️  Provisioning commun déjà effectué (marqueur trouvé)"
+    exit 0
+  fi
+
+  echo "🔄 Attente de cloud-init (évite les courses avec SSH/réseau)..."
   command -v cloud-init >/dev/null 2>&1 && cloud-init status --wait || true
 
-  # 1) Pré-requis noyau + sysctl
+  # ========== 1) PRÉ-REQUIS NOYAU + SYSCTL ==========
+  echo "📦 Configuration des modules kernel requis..."
   cat >/etc/modules-load.d/k8s.conf <<'EOF'
 overlay
 br_netfilter
@@ -41,29 +56,53 @@ net.ipv4.ip_forward = 1
 EOF
   sysctl --system
 
-  # 2) Désactiver la SWAP
+  # ========== 2) DÉSACTIVER LA SWAP ==========
+  echo "💾 Désactivation de la swap (requis pour Kubernetes)..."
   swapoff -a || true
   sed -ri '/\\sswap\\s/s/^/#/' /etc/fstab || true
 
-  # 3) Containerd + SystemdCgroup
+  # ========== 3) INSTALLATION ET CONFIGURATION DE CONTAINERD ==========
+  echo "🐳 Installation de containerd avec SystemdCgroup..."
   apt-get update
-  apt-get install -y --no-install-recommends containerd ca-certificates curl gpg apt-transport-https
+  apt-get install -y --no-install-recommends \\
+    containerd \\
+    ca-certificates \\
+    curl \\
+    gpg \\
+    apt-transport-https
+
   mkdir -p /etc/containerd
   if [ ! -s /etc/containerd/config.toml ]; then
     containerd config default | tee /etc/containerd/config.toml >/dev/null
   fi
+
+  # Configuration SystemdCgroup = true (recommandation officielle)
   sed -ri 's/^\\s*SystemdCgroup = .*/            SystemdCgroup = true/' /etc/containerd/config.toml
+
   systemctl daemon-reload
   systemctl enable containerd
   systemctl restart containerd
 
-  # Attendre que containerd soit complètement démarré (important sur ARM)
-  sleep 10
+  # Attente stabilité de containerd (critique sur ARM64)
+  echo "⏳ Attente de la stabilisation de containerd (15s)..."
+  sleep 15
 
-  # 4) Dépôt Kubernetes + kubelet/kubeadm/kubectl
+  # Vérification que containerd est actif
+  if ! systemctl is-active --quiet containerd; then
+    echo "❌ ERREUR: containerd n'a pas démarré correctement"
+    systemctl status containerd
+    exit 1
+  fi
+
+  # ========== 4) DÉPÔT KUBERNETES + PACKAGES ==========
+  echo "🔑 Configuration du dépôt Kubernetes avec vérification GPG..."
   install -m 0755 -d /etc/apt/keyrings
+
+  # Téléchargement et installation de la clé GPG
+  # Note: En production, vérifier l'empreinte GPG manuellement
+  # gpg --show-keys /etc/apt/keyrings/kubernetes-apt-keyring.gpg
   if [ ! -f /etc/apt/keyrings/kubernetes-apt-keyring.gpg ]; then
-    curl -fsSL https://pkgs.k8s.io/core:/stable:/#{K8S_VERSION}/deb/Release.key \
+    curl -fsSL https://pkgs.k8s.io/core:/stable:/#{K8S_VERSION}/deb/Release.key \\
       | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
     chmod a+r /etc/apt/keyrings/kubernetes-apt-keyring.gpg
   fi
@@ -72,176 +111,308 @@ EOF
 deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/#{K8S_VERSION}/deb/ /
 EOF
 
+  # Installation des versions EXACTES (reproductibilité)
+  echo "📥 Installation de kubelet, kubeadm, kubectl (version #{K8S_PACKAGE_VERSION})..."
   apt-get update
-  apt-get install -y kubelet kubeadm kubectl
+  apt-get install -y \\
+    kubelet=#{K8S_PACKAGE_VERSION} \\
+    kubeadm=#{K8S_PACKAGE_VERSION} \\
+    kubectl=#{K8S_PACKAGE_VERSION}
+  
   apt-mark hold kubelet kubeadm kubectl
 
-  # 5) Kubelet: NE PAS démarrer (kubeadm init s'en chargera)
-  # systemctl enable kubelet est volontairement commenté
+  # Le kubelet est activé par défaut mais ne démarrera qu'après kubeadm init/join
+  systemctl enable kubelet
+
+  # Marquer le provisioning comme terminé
+  mkdir -p /etc/kubernetes
+  touch "$PROVISION_MARKER"
+  echo "✅ Provisioning commun terminé avec succès"
 SHELL
 
+# ========== SCRIPT DE PROVISIONING CONTROL-PLANE ==========
 MASTER_PROVISION = <<-SHELL
   set -euxo pipefail
 
-  # S'assurer que containerd est prêt et stable
+  # Marqueur d'idempotence
+  PROVISION_MARKER="/etc/kubernetes/.master-provisioned"
+  if [ -f "$PROVISION_MARKER" ]; then
+    echo "⏭️  Provisioning control-plane déjà effectué"
+    exit 0
+  fi
+
+  echo "🎛️  Initialisation du control plane..."
+
+  # Vérification que containerd est stable
   systemctl is-active --quiet containerd || systemctl restart containerd
   sleep 10
 
-  # S'assurer que kubelet est arrêté avant kubeadm init (kubeadm le démarrera lui-même)
+  # Arrêt propre du kubelet avant kubeadm init (kubeadm le redémarrera)
   systemctl stop kubelet 2>/dev/null || true
 
-  # Initialisation control-plane
+  # ========== INITIALISATION DU CLUSTER ==========
   if [ ! -f /etc/kubernetes/admin.conf ]; then
-    echo "Initialisation du control plane..."
-    kubeadm init \
-      --pod-network-cidr=#{POD_CIDR} \
-      --apiserver-advertise-address=#{CONTROL_PLANE_IP} \
-      --control-plane-endpoint=#{CONTROL_PLANE_IP} \
-      --upload-certs
+    echo "🚀 Exécution de kubeadm init..."
+    kubeadm init \\
+      --pod-network-cidr=#{POD_CIDR} \\
+      --apiserver-advertise-address=#{CONTROL_PLANE_IP} \\
+      --control-plane-endpoint=#{CONTROL_PLANE_IP} \\
+      --upload-certs \\
+      --v=5  # Verbosité pour déboguer si problème
+  else
+    echo "✅ Cluster déjà initialisé (admin.conf existe)"
   fi
 
-  # Kubeconfig pour vagrant
+  # ========== CONFIGURATION KUBECONFIG POUR VAGRANT ==========
+  echo "📝 Configuration kubeconfig pour l'utilisateur vagrant..."
   mkdir -p /home/vagrant/.kube
   cp -f /etc/kubernetes/admin.conf /home/vagrant/.kube/config
   chown -R vagrant:vagrant /home/vagrant/.kube
 
-  # Attendre que l'API server soit complètement prêt (retry robuste)
-  echo "Attente de la disponibilité complète de l'API server..."
-  for i in $(seq 1 60); do
+  # ========== ATTENTE DE L'API SERVER ==========
+  echo "⏳ Vérification de la disponibilité de l'API server (timeout: 10 min)..."
+  API_READY=false
+  for i in $(seq 1 120); do
     if kubectl --kubeconfig=/etc/kubernetes/admin.conf get nodes >/dev/null 2>&1; then
-      echo "API server prêt après $i tentative(s)"
+      echo "✅ API server prêt après $i tentative(s) ($(($i * 5))s)"
+      API_READY=true
       break
     fi
-    echo "Attente de l'API server... ($i/60)"
+    echo "⏳ Attente de l'API server... ($i/120 - $(($i * 5))s)"
     sleep 5
   done
 
-  # Vérification finale que l'API server répond
-  if ! kubectl --kubeconfig=/etc/kubernetes/admin.conf get nodes >/dev/null 2>&1; then
-    echo "ERREUR: L'API server ne répond pas après 5 minutes"
+  if [ "$API_READY" = false ]; then
+    echo "❌ ERREUR CRITIQUE: L'API server ne répond pas après 10 minutes"
+    echo "🔍 Logs kubelet:"
+    journalctl -u kubelet -n 50 --no-pager
+    echo "🔍 Logs containerd:"
+    journalctl -u containerd -n 50 --no-pager
     exit 1
   fi
 
-  # Calico (CNI)
+  # ========== INSTALLATION DE CALICO CNI ==========
   if ! kubectl --kubeconfig=/etc/kubernetes/admin.conf get ns calico-system >/dev/null 2>&1; then
-    echo "Installation de Calico CNI..."
-    curl -fsSL https://raw.githubusercontent.com/projectcalico/calico/v3.30.4/manifests/calico.yaml -o /tmp/calico.yaml
+    echo "🌐 Installation de Calico CNI (version #{CALICO_VERSION})..."
+    curl -fsSL https://raw.githubusercontent.com/projectcalico/calico/#{CALICO_VERSION}/manifests/calico.yaml \\
+      -o /tmp/calico.yaml
     kubectl --kubeconfig=/etc/kubernetes/admin.conf apply -f /tmp/calico.yaml
+
+    # Attente que Calico soit prêt
+    echo "⏳ Attente que Calico soit opérationnel (timeout: 10 min)..."
+    kubectl --kubeconfig=/etc/kubernetes/admin.conf wait \\
+      --for=condition=Ready \\
+      -n kube-system \\
+      pod -l k8s-app=calico-node \\
+      --timeout=600s || {
+        echo "⚠️  AVERTISSEMENT: Calico n'est pas complètement prêt après 10 min"
+        echo "🔍 État des pods Calico:"
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf get pods -n kube-system -l k8s-app=calico-node
+      }
+  else
+    echo "✅ Calico déjà installé"
   fi
 
-  # Join command
+  # ========== GÉNÉRATION DE LA COMMANDE JOIN ==========
+  echo "🔗 Génération du script de join pour les workers..."
   JOIN_CMD=$(kubeadm token create --print-join-command)
-  echo "#!/usr/bin/env bash" > /vagrant/join.sh
-  echo "set -euxo pipefail" >> /vagrant/join.sh
-  echo "$JOIN_CMD" >> /vagrant/join.sh
+  cat >/vagrant/join.sh <<EOF
+#!/usr/bin/env bash
+set -euxo pipefail
+# Généré automatiquement le $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+# Commande de join pour rejoindre le cluster #{CLUSTER_NAME}
+$JOIN_CMD
+EOF
   chmod +x /vagrant/join.sh
 
-  # Garde-fou (non bloquant)
-  kubectl --kubeconfig=/etc/kubernetes/admin.conf wait --for=condition=Ready node --all --timeout=300s || true
+  # ========== ATTENTE QUE TOUS LES NŒUDS SOIENT READY ==========
+  echo "⏳ Attente que tous les nœuds soient Ready (timeout: 10 min)..."
+  kubectl --kubeconfig=/etc/kubernetes/admin.conf wait \\
+    --for=condition=Ready \\
+    node --all \\
+    --timeout=600s || {
+      echo "⚠️  AVERTISSEMENT: Tous les nœuds ne sont pas Ready après 10 min"
+      echo "🔍 État du cluster:"
+      kubectl --kubeconfig=/etc/kubernetes/admin.conf get nodes -o wide
+      kubectl --kubeconfig=/etc/kubernetes/admin.conf get pods -A
+    }
+
+  # Marquer le provisioning comme terminé
+  touch "$PROVISION_MARKER"
+  echo "✅ Control-plane provisionné avec succès!"
+  echo "📊 État du cluster:"
+  kubectl --kubeconfig=/etc/kubernetes/admin.conf get nodes -o wide
 SHELL
 
+# ========== SCRIPT DE PROVISIONING WORKER ==========
 WORKER_PROVISION = <<-SHELL
   set -euxo pipefail
 
-  # Attendre que le control plane soit complètement stable (important!)
-  echo "Attente de la stabilité du control plane..."
-  sleep 10
+  # Marqueur d'idempotence
+  PROVISION_MARKER="/etc/kubernetes/.worker-provisioned"
+  if [ -f "$PROVISION_MARKER" ]; then
+    echo "⏭️  Provisioning worker déjà effectué"
+    exit 0
+  fi
 
-  # Assainir un éventuel kubelet déjà démarré par systemd (reprovisionnements)
+  echo "👷 Provisioning du worker node..."
+
+  # Attente de la stabilité du control plane (critique!)
+  echo "⏳ Attente de la stabilité du control plane (20s)..."
+  sleep 20
+
+  # Arrêt propre du kubelet
   systemctl stop kubelet 2>/dev/null || true
 
-  echo "Nettoyage de l'état kubeadm précédemment généré..."
+  # Nettoyage d'un éventuel état précédent (idempotence)
+  echo "🧹 Nettoyage de l'état kubeadm précédent..."
   kubeadm reset -f || true
   rm -rf /etc/cni/net.d/* || true
 
-  # Vérifier que l'API server répond avant de joindre
-  echo "Vérification de la disponibilité de l'API server..."
-  for i in $(seq 1 60); do
-    if curl -k https://#{CONTROL_PLANE_IP}:6443/healthz &>/dev/null; then
-      echo "API server disponible"
+  # ========== VÉRIFICATION DE L'API SERVER ==========
+  echo "🔍 Vérification de la disponibilité de l'API server..."
+  API_AVAILABLE=false
+  for i in $(seq 1 120); do
+    # Note: -k désactive la vérification TLS (acceptable en environnement de test)
+    if curl -k -s https://#{CONTROL_PLANE_IP}:6443/healthz &>/dev/null; then
+      echo "✅ API server disponible après $i tentative(s)"
+      API_AVAILABLE=true
       break
     fi
-    echo "Attente de l'API server... ($i/60)"
+    echo "⏳ Attente de l'API server... ($i/120 - $(($i * 5))s)"
     sleep 5
   done
 
-  if [ ! -f /vagrant/join.sh ]; then
-    echo "ERREUR: /vagrant/join.sh introuvable (le control plane n'a pas publié le script)"
+  if [ "$API_AVAILABLE" = false ]; then
+    echo "❌ ERREUR: L'API server sur #{CONTROL_PLANE_IP}:6443 n'est pas accessible après 10 minutes"
     exit 1
   fi
 
-  echo "Exécution de /vagrant/join.sh"
-  bash /vagrant/join.sh
+  # ========== VÉRIFICATION DU SCRIPT JOIN ==========
+  if [ ! -f /vagrant/join.sh ]; then
+    echo "❌ ERREUR: /vagrant/join.sh introuvable"
+    echo "🔍 Le control-plane n'a pas encore généré le script de join"
+    ls -la /vagrant/ || true
+    exit 1
+  fi
+
+  # ========== EXÉCUTION DU JOIN ==========
+  echo "🔗 Exécution de la commande kubeadm join..."
+  bash -x /vagrant/join.sh
+
+  # Vérification que le kubelet est actif après le join
+  if ! systemctl is-active --quiet kubelet; then
+    echo "❌ ERREUR: Le kubelet n'a pas démarré après le join"
+    systemctl status kubelet --no-pager
+    exit 1
+  fi
+
+  # Marquer le provisioning comme terminé
+  mkdir -p /etc/kubernetes
+  touch "$PROVISION_MARKER"
+  echo "✅ Worker provisionné avec succès!"
 SHELL
 
+# ========== CONFIGURATION VAGRANT ==========
 Vagrant.configure("2") do |config|
   config.vm.box = BOX_NAME
   config.vm.synced_folder ".", "/vagrant", disabled: false
   config.vm.synced_folder REPO_ROOT, "/workspace",
                            type: "rsync",
                            rsync__auto: true,
-                           rsync__exclude: [".git/", "node_modules/"]
+                           rsync__exclude: [".git/", "node_modules/", "*.log"]
 
-  # Évite la rotation de clé (réduit les échecs SSH pendant le provisioning)
+  # Configuration SSH
   config.ssh.insert_key = false
   config.vm.boot_timeout = 600
 
+  # ========== DÉFINITION DES NŒUDS ==========
   NODES.each do |n|
     config.vm.define n[:name], autostart: (n[:name] == "cp1") do |node|
       node.vm.box = BOX_NAME
       node.vm.hostname = "#{CLUSTER_NAME}-#{n[:name]}"
       node.vm.network "private_network", ip: "#{IP_BASE}.#{n[:ip_octet]}"
 
+      # ========== CONFIGURATION PROVIDER ==========
       node.vm.provider "vmware_desktop" do |v|
-        # Control plane : 3 vCPU / 4GB RAM, Workers : 2 vCPU / 2GB RAM
-        if n[:role] == "control-plane"
-          v.vmx["memsize"]  = "4096"
-          v.vmx["numvcpus"] = "3"
-        else
-          v.vmx["memsize"]  = "2048"
-          v.vmx["numvcpus"] = "2"
-        end
-        v.vmx["ethernet0.pcislotnumber"] = "160" # évite le warning + soucis réseau
+        v.vmx["memsize"]  = n[:memory].to_s
+        v.vmx["numvcpus"] = n[:cpus].to_s
+        v.vmx["ethernet0.pcislotnumber"] = "160" # Évite les warnings réseau VMware
         v.gui = false
       end
 
-      # Attendre cloud-init — run: once
-      node.vm.provision "shell", inline: "set -euxo pipefail; command -v cloud-init >/dev/null 2>&1 && cloud-init status --wait || true",
-                                   privileged: true, run: "once"
-
-      # Provision commun — run: once
-      node.vm.provision "shell", inline: COMMON_PROVISION, run: "once"
-
-      # Configuration de l'interface private network (workaround VMware) — run: once
-      node.vm.provision "shell", run: "once", inline: <<-SHELL
+      # ========== PROVISIONING 1: ATTENTE CLOUD-INIT ==========
+      node.vm.provision "cloud-init-wait", type: "shell", privileged: true, inline: <<-SHELL
         set -euxo pipefail
-        NODE_IP="#{IP_BASE}.#{n[:ip_octet]}"
+        command -v cloud-init >/dev/null 2>&1 && cloud-init status --wait || true
+      SHELL
 
-        # Détecter l'interface sans IP (typiquement ens256 pour VMware)
-        IFACE=$(ip -o link show | awk -F': ' '{print $2}' | grep -E '^ens[0-9]+$' | while read if; do
-          if ! ip addr show "$if" | grep -q 'inet '; then
-            echo "$if"
-            break
-          fi
-        done)
+      # ========== PROVISIONING 2: COMMUN ==========
+      node.vm.provision "common", type: "shell", privileged: true, inline: COMMON_PROVISION
+
+      # ========== PROVISIONING 3: CONFIGURATION RÉSEAU ==========
+      # Note: Vagrant configure déjà l'IP via config.vm.network "private_network"
+      # Ce provisioner vérifie juste que la configuration est correcte
+      node.vm.provision "network-config", type: "shell", privileged: true, inline: <<-SHELL
+        set -euxo pipefail
+        
+        NODE_IP="#{IP_BASE}.#{n[:ip_octet]}"
+        MARKER="/etc/kubernetes/.network-configured"
+        
+        if [ -f "$MARKER" ]; then
+          echo "⏭️  Réseau déjà configuré"
+          exit 0
+        fi
+
+        echo "🌐 Vérification de la configuration réseau..."
+
+        # Vagrant configure automatiquement le private_network
+        # On détecte l'interface qui a notre IP cible
+        IFACE=$(ip -4 -o addr show | grep "$NODE_IP" | awk '{print $2}')
 
         if [ -z "$IFACE" ]; then
-          for candidate in ens256 ens224 ens192; do
+          echo "⚠️  Interface avec IP $NODE_IP non trouvée, détection automatique..."
+          
+          # Fallback : chercher une interface qui N'EST PAS la principale (ens160)
+          # Sur VMware, c'est typiquement ens224, ens192, ou ens256
+          for candidate in ens224 ens256 ens192; do
             if ip link show "$candidate" >/dev/null 2>&1; then
               IFACE="$candidate"
+              echo "✅ Interface détectée: $IFACE"
+              
+              # Vérifier si l'interface a déjà une IP
+              CURRENT_IP=$(ip -4 -o addr show "$IFACE" | awk '{print $4}' | cut -d/ -f1)
+              
+              if [ "$CURRENT_IP" = "$NODE_IP" ]; then
+                echo "✅ Interface $IFACE déjà configurée avec $NODE_IP"
+              elif [ -n "$CURRENT_IP" ]; then
+                echo "⚠️  Interface $IFACE a déjà l'IP $CURRENT_IP, mise à jour vers $NODE_IP..."
+                ip addr flush dev "$IFACE"
+                ip addr add "$NODE_IP/24" dev "$IFACE"
+              else
+                echo "🔧 Configuration de l'interface $IFACE avec $NODE_IP..."
+                ip link set "$IFACE" up
+                ip addr add "$NODE_IP/24" dev "$IFACE"
+              fi
+              
               break
             fi
           done
+        else
+          echo "✅ Interface $IFACE déjà configurée avec IP $NODE_IP par Vagrant"
         fi
 
-        if [ -n "$IFACE" ]; then
-          echo "Configuration de l'interface $IFACE avec l'IP $NODE_IP"
-          ip link set "$IFACE" up
-          ip addr flush dev "$IFACE" || true
-          ip addr add "$NODE_IP/24" dev "$IFACE" || true
+        if [ -z "$IFACE" ]; then
+          echo "❌ ERREUR: Impossible de trouver l'interface réseau"
+          echo "🔍 Interfaces disponibles:"
+          ip -o link show
+          echo "🔍 Adresses IP:"
+          ip -4 -o addr show
+          exit 1
+        fi
 
-          # Rendre la configuration persistante avec netplan
-          cat >/etc/netplan/60-private-network.yaml <<EOF
+        # Configuration persistante avec netplan (pour survivre aux redémarrages)
+        cat >/etc/netplan/60-private-network.yaml <<EOF
 network:
   version: 2
   ethernets:
@@ -249,62 +420,107 @@ network:
       addresses:
         - $NODE_IP/24
 EOF
-          chmod 600 /etc/netplan/60-private-network.yaml
-          netplan apply || true
-        else
-          echo "AVERTISSEMENT: Aucune interface non configurée trouvée"
-        fi
+        chmod 600 /etc/netplan/60-private-network.yaml
+        netplan apply || echo "⚠️  netplan apply a échoué (non bloquant)"
+
+        touch "$MARKER"
+        echo "✅ Configuration réseau validée pour $IFACE ($NODE_IP)"
       SHELL
 
-      # Forcer le node-ip de CE nœud (crucial avec VMware Fusion multi-interfaces) — run: once
-      node.vm.provision "shell", run: "once", inline: <<-SHELL
+      # ========== PROVISIONING 4: CONFIGURATION KUBELET NODE-IP ==========
+      node.vm.provision "kubelet-node-ip", type: "shell", privileged: true, inline: <<-SHELL
         set -euxo pipefail
+        
         NODE_IP="#{IP_BASE}.#{n[:ip_octet]}"
+        MARKER="/etc/kubernetes/.kubelet-nodeip-configured"
+        
+        if [ -f "$MARKER" ]; then
+          echo "⏭️  Kubelet node-ip déjà configuré"
+          exit 0
+        fi
 
-        # Configuration kubelet avec node-ip via /etc/default/kubelet
-        # (comme attendu par le drop-in officiel /usr/lib/systemd/system/kubelet.service.d/10-kubeadm.conf)
+        echo "🔧 Configuration du node-ip pour kubelet..."
+        
+        # Configuration via /etc/default/kubelet (lu par le drop-in officiel)
         cat >/etc/default/kubelet <<EOF
 KUBELET_EXTRA_ARGS=--node-ip=$NODE_IP
 EOF
 
         systemctl daemon-reload
+        
+        touch "$MARKER"
+        echo "✅ Kubelet configuré avec node-ip=$NODE_IP"
       SHELL
 
+      # ========== PROVISIONING 5: RÔLE-SPÉCIFIQUE ==========
       if n[:role] == "control-plane"
-        # Init control-plane — run: once
-        node.vm.provision "shell", inline: MASTER_PROVISION, run: "once"
+        node.vm.provision "init-control-plane", type: "shell", privileged: true, inline: MASTER_PROVISION
       else
-        # Join worker — run: once (ne se relancera pas aux boots suivants)
-        node.vm.provision "shell", inline: WORKER_PROVISION, run: "once"
+        node.vm.provision "join-worker", type: "shell", privileged: true, inline: WORKER_PROVISION
       end
 
-      node.vm.provision "shell", privileged: true, run: "once", inline: <<-SHELL
+      # ========== PROVISIONING 6: KUBELET-AUTO-CONFIG SERVICE ==========
+      node.vm.provision "kubelet-auto-config", type: "shell", privileged: true, inline: <<-SHELL
         set -euxo pipefail
 
-        # Vérifier que /workspace est monté
-        echo "Vérification du montage /workspace..."
+        MARKER="/etc/kubernetes/.kubelet-auto-config-installed"
+        
+        if [ -f "$MARKER" ]; then
+          echo "⏭️  kubelet-auto-config déjà installé"
+          exit 0
+        fi
+
+        echo "📦 Installation du service kubelet-auto-config (rôle: #{n[:role]})..."
+
+        # Vérification du montage /workspace
         if [ ! -d /workspace ]; then
-          echo "ERREUR: /workspace n'est pas monté"
+          echo "❌ ERREUR: /workspace n'est pas monté"
           exit 1
         fi
 
         if [ ! -f /workspace/kubelet_auto_config.sh ]; then
-          echo "ERREUR: Les fichiers du repo ne sont pas disponibles dans /workspace"
+          echo "❌ ERREUR: kubelet_auto_config.sh introuvable dans /workspace"
+          ls -la /workspace/ || true
           exit 1
         fi
 
-        echo "Installation de kubelet-auto-config systemd service (rôle: #{n[:role]})..."
+        # Création de l'archive et installation
         ARCHIVE="/tmp/reserved-sys-kube.tar.gz"
-        tar czf "$ARCHIVE" -C /workspace kubelet_auto_config.sh rollback-kubelet-config.sh remove-kubelet-auto-config.sh systemd
+        tar czf "$ARCHIVE" -C /workspace \\
+          kubelet_auto_config.sh \\
+          rollback-kubelet-config.sh \\
+          remove-kubelet-auto-config.sh \\
+          systemd
+
         rm -rf /usr/local/lib/kubelet-auto-config
         mkdir -p /usr/local/lib/kubelet-auto-config
         tar xzf "$ARCHIVE" -C /usr/local/lib/kubelet-auto-config
-        install -m 0755 /usr/local/lib/kubelet-auto-config/kubelet_auto_config.sh /usr/local/bin/kubelet_auto_config.sh
-        install -m 0755 /usr/local/lib/kubelet-auto-config/rollback-kubelet-config.sh /usr/local/bin/rollback-kubelet-config.sh
-        install -m 0755 /usr/local/lib/kubelet-auto-config/remove-kubelet-auto-config.sh /usr/local/bin/remove-kubelet-auto-config.sh
+
+        # Installation des scripts
+        install -m 0755 /usr/local/lib/kubelet-auto-config/kubelet_auto_config.sh \\
+          /usr/local/bin/kubelet_auto_config.sh
+        install -m 0755 /usr/local/lib/kubelet-auto-config/rollback-kubelet-config.sh \\
+          /usr/local/bin/rollback-kubelet-config.sh
+        install -m 0755 /usr/local/lib/kubelet-auto-config/remove-kubelet-auto-config.sh \\
+          /usr/local/bin/remove-kubelet-auto-config.sh
+
+        # Installation du service systemd
+        if [ ! -x /usr/local/lib/kubelet-auto-config/systemd/install-kubelet-auto-config.sh ]; then
+          echo "❌ ERREUR: install-kubelet-auto-config.sh introuvable ou non exécutable"
+          exit 1
+        fi
+
         /usr/local/lib/kubelet-auto-config/systemd/install-kubelet-auto-config.sh #{n[:role]}
 
-        echo "Service kubelet-auto-config@#{n[:role]} installé et activé"
+        # Vérification post-installation
+        if ! systemctl is-enabled kubelet-auto-config@#{n[:role]} >/dev/null 2>&1; then
+          echo "❌ ERREUR: Le service kubelet-auto-config@#{n[:role]} n'est pas activé"
+          systemctl status kubelet-auto-config@#{n[:role]} --no-pager || true
+          exit 1
+        fi
+
+        touch "$MARKER"
+        echo "✅ Service kubelet-auto-config@#{n[:role]} installé et activé"
       SHELL
     end
   end
