@@ -1,62 +1,142 @@
 #cloud-config
 
 package_update: true
+package_upgrade: true
+package_reboot_if_required: true
+
 packages:
   - git
 
 write_files:
+  - path: /etc/default/reserved-sys-kube
+    permissions: '0644'
+    owner: root:root
+    content: |
+      VERSION_TAG=v3.1.2
+      REPO=https://github.com/MacFlurry/reserved-sys-kube.git
+
   - path: /usr/local/sbin/reserved-sys-kube-bootstrap.sh
     permissions: '0755'
     owner: root:root
     content: |
       #!/bin/bash
       set -euo pipefail
-
-      REPO="https://github.com/MacFlurry/reserved-sys-kube.git"
-      VERSION_TAG="v3.1.2"
+      
+      # Configuration
+      [[ -f /etc/default/reserved-sys-kube ]] && source /etc/default/reserved-sys-kube
+      
+      VERSION_TAG="${VERSION_TAG:-v3.1.2}"
+      REPO="${REPO:-https://github.com/MacFlurry/reserved-sys-kube.git}"
       WORKDIR="/run/reserved-sys-kube-work"
       TARGET_LIB="/usr/local/lib/kubelet-auto-config"
       TARGET_BIN="/usr/local/bin"
       ROLE="${1:-control-plane}"
       LOG_FILE="/var/log/reserved-sys-kube-install.log"
-
-      echo "[reserved-sys-kube] Starting installation (tag=${VERSION_TAG}, role=${ROLE})..." | tee "$LOG_FILE"
-
+      STATE_DIR="/var/lib/reserved-sys-kube"
+      
+      # Logging helper
+      log() {
+        echo "[$(date +'%Y-%m-%d %H:%M:%S')] [reserved-sys-kube] $*" >> "$LOG_FILE"
+      }
+      
+      log_error() {
+        echo "[$(date +'%Y-%m-%d %H:%M:%S')] [reserved-sys-kube] ERROR: $*" >> "$LOG_FILE"
+        echo "[reserved-sys-kube] ERROR: $*" >&2
+      }
+      
+      # Check if already installed
+      if [[ -f "$STATE_DIR/.installed" ]]; then
+        INSTALLED_VERSION=$(cat "$STATE_DIR/version" 2>/dev/null || echo "unknown")
+        log "Already installed (version=$INSTALLED_VERSION), skipping"
+        exit 0
+      fi
+      
+      log "Starting installation (tag=${VERSION_TAG}, role=${ROLE})"
+      
+      # Verify dependencies
       command -v git >/dev/null 2>&1 || {
-        echo "[reserved-sys-kube] ERROR: git not found, aborting." | tee -a "$LOG_FILE" >&2
+        log_error "git not found"
         exit 1
       }
-
+      
+      # Clone repository
       rm -rf "$WORKDIR"
       mkdir -p "$WORKDIR"
-
-      git clone --depth 1 --branch "$VERSION_TAG" "$REPO" "$WORKDIR"
-
+      
+      log "Cloning repository from ${REPO} (tag=${VERSION_TAG})"
+      git clone --depth 1 --branch "$VERSION_TAG" "$REPO" "$WORKDIR" >> "$LOG_FILE" 2>&1 || {
+        log_error "git clone failed"
+        exit 1
+      }
+      
+      # Validate repository structure
+      log "Validating repository structure"
+      
+      [[ -d "$WORKDIR/systemd" ]] || {
+        log_error "systemd/ directory not found in repository"
+        exit 1
+      }
+      
+      REQUIRED_FILES=(
+        "kubelet_auto_config.sh"
+        "rollback-kubelet-config.sh"
+        "remove-kubelet-auto-config.sh"
+        "systemd/install-kubelet-auto-config.sh"
+      )
+      
+      for file in "${REQUIRED_FILES[@]}"; do
+        [[ -f "$WORKDIR/$file" ]] || {
+          log_error "Required file '$file' not found in repository"
+          exit 1
+        }
+      done
+      
+      log "Repository structure validated successfully"
+      
+      # Install files
+      log "Installing files to ${TARGET_LIB}"
+      
       rm -rf "$TARGET_LIB"
-      mkdir -p "$TARGET_LIB"
-      mkdir -p "$TARGET_BIN"
-
+      mkdir -p "$TARGET_LIB" "$TARGET_BIN" "$STATE_DIR"
+      
       cp "$WORKDIR/kubelet_auto_config.sh"        "$TARGET_LIB/"
       cp "$WORKDIR/rollback-kubelet-config.sh"    "$TARGET_LIB/"
       cp "$WORKDIR/remove-kubelet-auto-config.sh" "$TARGET_LIB/"
       cp -r "$WORKDIR/systemd"                    "$TARGET_LIB/"
-
+      
       chmod 0755 "$TARGET_LIB"/*.sh
       chmod 0755 "$TARGET_LIB/systemd/install-kubelet-auto-config.sh"
-
+      
       install -m 0755 "$TARGET_LIB/kubelet_auto_config.sh"        "$TARGET_BIN/"
       install -m 0755 "$TARGET_LIB/rollback-kubelet-config.sh"    "$TARGET_BIN/"
       install -m 0755 "$TARGET_LIB/remove-kubelet-auto-config.sh" "$TARGET_BIN/"
-
-      "$TARGET_LIB/systemd/install-kubelet-auto-config.sh" "$ROLE" || {
-        echo "[reserved-sys-kube] ERROR: systemd install script failed." | tee -a "$LOG_FILE" >&2
+      
+      log "Files installed successfully"
+      
+      # Run systemd installation
+      log "Running systemd installation for role: ${ROLE}"
+      
+      "$TARGET_LIB/systemd/install-kubelet-auto-config.sh" "$ROLE" >> "$LOG_FILE" 2>&1 || {
+        log_error "systemd installation script failed"
         exit 1
       }
-
+      
+      # Mark as installed
+      touch "$STATE_DIR/.installed"
+      echo "$VERSION_TAG" > "$STATE_DIR/version"
+      echo "$ROLE" > "$STATE_DIR/role"
+      date -u +'%Y-%m-%d %H:%M:%S' > "$STATE_DIR/installed_at"
+      
+      # Cleanup
       rm -rf "$WORKDIR"
-      echo "[reserved-sys-kube] Installation completed successfully (role=${ROLE})" | tee -a "$LOG_FILE"
+      
+      log "Installation completed successfully (role=${ROLE}, version=${VERSION_TAG})"
 
 runcmd:
-  - [ bash, /usr/local/sbin/reserved-sys-kube-bootstrap.sh, "control-plane" ]
+  - |
+    if ! bash /usr/local/sbin/reserved-sys-kube-bootstrap.sh "control-plane" 2>&1; then
+      echo "[reserved-sys-kube] Installation failed - check /var/log/reserved-sys-kube-install.log" >&2
+      exit 1
+    fi
 
-final_message: "reserved-sys-kube installation complete"
+final_message: "reserved-sys-kube installation complete - logs available at /var/log/reserved-sys-kube-install.log"
