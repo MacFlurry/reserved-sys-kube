@@ -1,0 +1,62 @@
+#cloud-config
+
+package_update: true
+packages:
+  - git
+
+write_files:
+  - path: /usr/local/sbin/reserved-sys-kube-bootstrap.sh
+    permissions: '0755'
+    owner: root:root
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+
+      REPO="https://github.com/MacFlurry/reserved-sys-kube.git"
+      VERSION_TAG="v3.1.2"
+      WORKDIR="/run/reserved-sys-kube-work"
+      TARGET_LIB="/usr/local/lib/kubelet-auto-config"
+      TARGET_BIN="/usr/local/bin"
+      ROLE="${1:-control-plane}"
+      LOG_FILE="/var/log/reserved-sys-kube-install.log"
+
+      echo "[reserved-sys-kube] Starting installation (tag=${VERSION_TAG}, role=${ROLE})..." | tee "$LOG_FILE"
+
+      command -v git >/dev/null 2>&1 || {
+        echo "[reserved-sys-kube] ERROR: git not found, aborting." | tee -a "$LOG_FILE" >&2
+        exit 1
+      }
+
+      rm -rf "$WORKDIR"
+      mkdir -p "$WORKDIR"
+
+      git clone --depth 1 --branch "$VERSION_TAG" "$REPO" "$WORKDIR"
+
+      rm -rf "$TARGET_LIB"
+      mkdir -p "$TARGET_LIB"
+      mkdir -p "$TARGET_BIN"
+
+      cp "$WORKDIR/kubelet_auto_config.sh"        "$TARGET_LIB/"
+      cp "$WORKDIR/rollback-kubelet-config.sh"    "$TARGET_LIB/"
+      cp "$WORKDIR/remove-kubelet-auto-config.sh" "$TARGET_LIB/"
+      cp -r "$WORKDIR/systemd"                    "$TARGET_LIB/"
+
+      chmod 0755 "$TARGET_LIB"/*.sh
+      chmod 0755 "$TARGET_LIB/systemd/install-kubelet-auto-config.sh"
+
+      install -m 0755 "$TARGET_LIB/kubelet_auto_config.sh"        "$TARGET_BIN/"
+      install -m 0755 "$TARGET_LIB/rollback-kubelet-config.sh"    "$TARGET_BIN/"
+      install -m 0755 "$TARGET_LIB/remove-kubelet-auto-config.sh" "$TARGET_BIN/"
+
+      "$TARGET_LIB/systemd/install-kubelet-auto-config.sh" "$ROLE" || {
+        echo "[reserved-sys-kube] ERROR: systemd install script failed." | tee -a "$LOG_FILE" >&2
+        exit 1
+      }
+
+      rm -rf "$WORKDIR"
+      echo "[reserved-sys-kube] Installation completed successfully (role=${ROLE})" | tee -a "$LOG_FILE"
+
+runcmd:
+  - [ bash, /usr/local/sbin/reserved-sys-kube-bootstrap.sh, "control-plane" ]
+
+final_message: "reserved-sys-kube installation complete"
