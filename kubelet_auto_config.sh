@@ -4,8 +4,6 @@
 # Version: 3.1.2
 # Tested on Kubernetes v1.32+, cgroups v1/v2, systemd, Ubuntu
 #
-# See CHANGELOG_v3.0.1.md for the full list of changes.
-#
 # Usage:
 #   ./kubelet_auto_config.sh [OPTIONS]
 #
@@ -1553,7 +1551,7 @@ main() {
         log_warning "Allocatable memory critically low: ${mem_alloc_percent}% (< 10% of capacity)"
     fi
 
-    # Garde-fous stricts
+    # Strict guardrails
     local min_cpu_percent=$MIN_ALLOC_CPU_PERCENT
     local min_mem_percent=$MIN_ALLOC_MEM_PERCENT
     if [[ "$NODE_TYPE_DETECTED" == "control-plane" ]]; then
