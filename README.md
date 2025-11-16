@@ -8,42 +8,42 @@
 
 ---
 
-## 📋 Table of contents
+## Table of contents
 
-- [Overview](#-overview)
-- [Prerequisites](#-prerequisites)
-- [Installation](#-installation)
-- [Usage](#-usage)
-- [Available profiles](#-available-profiles)
-- [Density factor](#%EF%B8%8F-density-factor)
-- [Usage examples](#-usage-examples)
-- [Cluster deployment](#-cluster-deployment)
-- [Post deployment validation](#-post-deployment-validation)
-- [Rollback](#-rollback)
-- [Removal](#-removal)
-- [FAQ](#-faq)
-- [Troubleshooting](#-troubleshooting)
-- [Monitoring and metrics](#-monitoring-and-metrics)
-- [Security and best practices](#-security-and-best-practices)
-- [Additional resources](#-additional-resources)
-- [Contribution](#-contribution)
-- [Changelog and release notes](#-changelog-and-release-notes)
-- [License](#-license)
-- [Support](#-support)
-- [Credits](#-credits)
+- [Overview](#overview)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Available profiles](#available-profiles)
+- [Density factor](#density-factor)
+- [Usage examples](#usage-examples)
+- [Cluster deployment](#cluster-deployment)
+- [Post deployment validation](#post-deployment-validation)
+- [Rollback](#rollback)
+- [Removal](#removal)
+- [FAQ](#faq)
+- [Troubleshooting](#troubleshooting)
+- [Monitoring and metrics](#monitoring-and-metrics)
+- [Security and best practices](#security-and-best-practices)
+- [Additional resources](#additional-resources)
+- [Contribution](#contribution)
+- [Changelog and release notes](#changelog-and-release-notes)
+- [License](#license)
+- [Support](#support)
+- [Credits](#credits)
 
 ---
 
-## 🎯 Overview
+## Overview
 
 The script automates kubelet reservation sizing. It:
 
-- ✅ **Detects** current node resources (vCPU, RAM, cgroup mode).
-- ✅ **Calculates** system and kube reservations using production proven formulas (GKE, EKS, OpenShift).
-- ✅ **Adapts** the result based on a desired pod density or a custom density factor.
-- ✅ **Generates** a full kubelet configuration file and preserves existing tweaks.
-- ✅ **Applies** the configuration with automatic validation, restart and backup/rotation logic.
-- ✅ **Skips** needless rewrites: if the generated config matches the live kubelet config, the script now exits early without creating extra backups or restarting kubelet.
+- **Detects** current node resources (vCPU, RAM, cgroup mode).
+- **Calculates** system and kube reservations using production proven formulas (GKE, EKS, OpenShift).
+- **Adapts** the result based on a desired pod density or a custom density factor.
+- **Generates** a full kubelet configuration file and preserves existing tweaks.
+- **Applies** the configuration with automatic validation, restart and backup/rotation logic.
+- **Skips** needless rewrites: if the generated config matches the live kubelet config, the script now exits early without creating extra backups or restarting kubelet.
 
 ### Why this script?
 
@@ -56,7 +56,7 @@ This script applies the vendor reference formulas and enforces safe guardrails s
 
 ---
 
-## 🔧 Prerequisites
+## Prerequisites
 
 ### Operating system
 
@@ -91,7 +91,7 @@ sudo chmod +x /usr/local/bin/yq
 yq --version
 ```
 
-> ℹ️ Ubuntu packages ship `yq` v3 (Python) which is not compatible with this project. The script automatically replaces it with the mikefarah v4 binary and validates the SHA256 checksum.
+> Ubuntu packages ship `yq` v3 (Python) which is not compatible with this project. The script automatically replaces it with the mikefarah v4 binary and validates the SHA256 checksum.
 
 ### Permissions
 
@@ -103,7 +103,7 @@ sudo ./kubelet_auto_config.sh
 
 ---
 
-## 📦 Installation
+## Installation
 
 ### Method 1 – direct download
 
@@ -133,7 +133,7 @@ done
 
 ---
 
-## 🚀 Usage
+## Usage
 
 ```bash
 sudo ./kubelet_auto_config.sh [OPTIONS]
@@ -157,7 +157,7 @@ The script is idempotent: running it again overwrites the configuration with the
 
 ---
 
-## 🧩 Available profiles
+## Available profiles
 
 - **gke** – Google reference formulas (balanced CPU/memory).
 - **eks** – Amazon reference formulas with extra CPU for AWS services.
@@ -168,7 +168,7 @@ Each profile can be combined with a density factor or target pod count to match 
 
 ---
 
-## ⚖️ Density factor
+## Density factor
 
 `density-factor` acts as an additional multiplier on top of the chosen profile. It enables three typical workflows:
 
@@ -183,7 +183,7 @@ Recommendations:
 
 ---
 
-## 📎 Usage examples
+## Usage examples
 
 ```bash
 # Minimal configuration on a worker
@@ -201,7 +201,7 @@ sudo ./kubelet_auto_config.sh --density-factor 1.4 --dry-run
 
 ---
 
-## 🛠️ Cluster deployment
+## Cluster deployment
 
 1. Copy the script to every node (see installation section).
 2. Execute it with the desired parameters.
@@ -252,7 +252,7 @@ The installer copies the service template from the repository, so you can ship i
 
 ---
 
-## ✅ Post deployment validation
+## Post deployment validation
 
 Run the following commands after every rollout:
 
@@ -271,7 +271,7 @@ Confirm that:
 
 ---
 
-## 🌀 Rollback
+## Rollback
 
 Use `rollback-kubelet-config.sh` to restore a previous version:
 
@@ -289,7 +289,7 @@ Features:
 
 ---
 
-## 🧹 Removal
+## Removal
 
 Use `remove-kubelet-auto-config.sh` when you need to remove every component (scripts + systemd units) without touching the running kubelet:
 
@@ -309,7 +309,7 @@ After the cleanup, you can optionally run `rollback-kubelet-config.sh --index 1`
 
 ---
 
-## ❓ FAQ
+## FAQ
 
 **Q. Do I have to stop the kubelet manually?**  
 No. The script restarts it and waits up to the configured timeout.
@@ -323,9 +323,28 @@ Yes, the script only touches `/var/lib/kubelet/config.yaml` and the backup files
 **Q. What about Windows nodes?**  
 Not supported. The project targets Linux nodes with systemd.
 
+### Why is kube-reserved not enforced on control-plane nodes?
+
+This script follows a **conservative approach** for control-plane nodes:
+
+- **On workers**: Both `system-reserved` AND `kube-reserved` are enforced
+- **On control-planes**: Only `system-reserved` is enforced (kube-reserved is disabled)
+
+**Why this choice?**
+
+1. **Static pods architecture**: Control-plane components (apiserver, etcd, etc.) run as static pods **outside the kubelet.slice cgroup**, so `kube-reserved` doesn't limit them anyway
+2. **Operational safety**: Avoiding potential cgroup misconfiguration issues
+3. **Industry convention**: GKE, EKS, and kubeadm follow this pattern
+4. **Minimal impact**: The kubelet process itself uses only ~200-500MB, so enforcing limits provides little value
+
+**Is this a Kubernetes requirement?**  
+No. Technically, you CAN enforce `kube-reserved` on control-planes. This is a **conservative design choice**, not a technical limitation.
+
+See [DESIGN_DECISIONS.md](./DESIGN_DECISIONS.md) for detailed rationale.
+
 ---
 
-## 🩺 Troubleshooting
+## Troubleshooting
 
 | Symptom | Resolution |
 | --- | --- |
@@ -336,7 +355,7 @@ Not supported. The project targets Linux nodes with systemd.
 
 ---
 
-## 📊 Monitoring and metrics
+## Monitoring and metrics
 
 A full monitoring lab lives in `tests/kubelet-alerting-lab/`:
 
@@ -353,7 +372,7 @@ cd tests/kubelet-alerting-lab
 
 ---
 
-## 🔐 Security and best practices
+## Security and best practices
 
 - Always keep at least one recent backup per node.
 - Run the script through a maintenance controller or an automation tool to avoid concurrent executions (the script uses flock for safety but planning ahead helps).
@@ -362,7 +381,7 @@ cd tests/kubelet-alerting-lab
 
 ---
 
-## 📚 Additional resources
+## Additional resources
 
 - [GKE guidance](https://cloud.google.com/kubernetes-engine/docs/how-to/configure-node-resources)
 - [EKS resource reservations](https://docs.aws.amazon.com/eks/latest/userguide/managing-kubelet.html)
@@ -370,7 +389,7 @@ cd tests/kubelet-alerting-lab
 
 ---
 
-## 🤝 Contribution
+## Contribution
 
 Pull requests are welcome! Please:
 
@@ -380,24 +399,24 @@ Pull requests are welcome! Please:
 
 ---
 
-## 🗒️ Changelog and release notes
+## Changelog and release notes
 
 See `CHANGELOG_v3.1.2.md` for the latest stable release. Historical changelog files live under the `changelog/` directory.
 
 ---
 
-## 📄 License
+## License
 
 MIT License – see [LICENSE](LICENSE).
 
 ---
 
-## 🆘 Support
+## Support
 
 - GitHub Issues: https://github.com/MacFlurry/reserved-sys-kube/issues
 
 ---
 
-## ✨ Credits
+## Credits
 
 Developed and maintained by the Platform Engineering Team. Inspired by the sizing guidance from Google, Amazon, Red Hat, and the Kubernetes SIG Scalability group.
