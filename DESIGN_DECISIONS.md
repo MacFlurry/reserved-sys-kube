@@ -52,6 +52,20 @@ enforceNodeAllocatable:
   - "system-reserved"
   - "kube-reserved"  # Full accounting on workers
 ```
+
+### Critical Assumption
+
+**This design assumes control-plane nodes are tainted to prevent workload scheduling.**
+
+If your control-plane nodes run user workloads (untainted), the risks change significantly:
+- Static pods compete with workload pods for resources in kubepods.slice
+- Without kube-reserved enforcement, workload pods can starve critical control-plane components
+- This can lead to cluster instability (apiserver/etcd OOM, scheduler unresponsive)
+
+**Recommendation for untainted control-planes:**
+Consider enforcing kube-reserved to protect control-plane components, or ensure 
+workloads have strict resource limits and lower QoS priority than control-plane pods.
+
 ### Alternative Approaches Considered
 #### Option 1: Enforce kube-reserved everywhere
 **Pros:**
