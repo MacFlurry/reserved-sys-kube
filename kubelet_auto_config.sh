@@ -497,7 +497,9 @@ detect_node_type() {
     if [[ "$is_control_plane" == true ]]; then
         NODE_TYPE_DETECTED="control-plane"
         log_success "Node detected: CONTROL-PLANE (static pods found in $manifests_dir)"
-        log_warning "Control-plane mode: kube-reserved will NOT be enforced (critical static pods preserved)"
+        log_warning "Control-plane mode: kube-reserved enforcement disabled (conservative approach)"
+        log_info "  Static pods (apiserver, etcd, etc.) run outside the kubelet cgroup hierarchy"
+        log_info "  Avoiding potential cgroup misconfiguration issues on control-plane components"
     else
         NODE_TYPE_DETECTED="worker"
         log_success "Node detected: WORKER (no control-plane static pods found)"
@@ -998,7 +1000,7 @@ validate_kubelet_slice_attachment() {
     if [[ "$effective_slice" == "kubelet.slice" ]]; then
         log_success "✓ kubelet service properly attached to kubelet.slice"
     else
-        log_error $'✗ kubelet service NOT in kubelet.slice (detected: '"${effective_slice:-N/A}"$')\n  → kube-reserved will NOT be enforced on the kubelet itself!\n  → Check: systemctl status kubelet | grep Cgroup'
+        log_error $'✗ kubelet service NOT in kubelet.slice (detected: '"${effective_slice:-N/A}"$')\n  kube-reserved will NOT be enforced on the kubelet itself!\n  Check: systemctl status kubelet | grep Cgroup'
     fi
 
     # Check the real kubelet process cgroup
@@ -1022,7 +1024,7 @@ validate_kubelet_slice_attachment() {
             if [[ -n "$kubelet_cgroup" ]]; then
                 if echo "$kubelet_cgroup" | grep -q "kubelet.slice"; then
                     log_success "✓ Kubelet process (PID $kubelet_pid) is in the correct cgroup"
-                    log_info "  → Cgroup: $kubelet_cgroup"
+                    log_info "  Cgroup: $kubelet_cgroup"
                 else
                     log_warning "✗ Kubelet process is in an unexpected cgroup: $kubelet_cgroup"
                 fi
@@ -1128,7 +1130,9 @@ kubeReserved:
 # RESERVATION ENFORCEMENT
 # ============================================================
 # Node type: $node_type
-# $(if [[ "$node_type" == "control-plane" ]]; then echo "kube-reserved NOT enforced (preserves critical static pods)"; else echo "kube-reserved enforced (worker node)"; fi)
+# $(if [[ "$node_type" == "control-plane" ]]; then echo "kube-reserved NOT enforced (conservative mode for control-plane stability)"; else echo "kube-reserved enforced (worker node)"; fi)
+# Control-plane: Static pods run with guaranteed resources outside kubelet cgroup limits
+# Worker: Full resource accounting including kubelet overhead
 enforceNodeAllocatable:
 $enforce_list
 
@@ -1221,7 +1225,9 @@ generate_kubelet_config() {
 
         # enforceNodeAllocatable (adapt based on node type)
         if [[ "$node_type" == "control-plane" ]]; then
-            log_warning "Control-plane mode: kube-reserved enforcement disabled"
+            log_warning "Control-plane mode: kube-reserved enforcement disabled (conservative policy)"
+            log_info "  → This is a safety measure to avoid cgroup conflicts with static pods"
+            log_info "  → system-reserved still applies to protect OS-level resources"
             yq eval -i '.enforceNodeAllocatable = ["pods", "system-reserved"]' "$output_file"
         else
             log_info "Worker mode: full enforcement (pods, system-reserved, kube-reserved)"
